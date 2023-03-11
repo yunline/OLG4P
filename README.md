@@ -27,8 +27,8 @@ while y<h*2:
 Or use `python oneliner.py -h` for help.
 
 ## Limitation
-Most of statements are not convertable.
-Here is the statements that have already been implemented.
+This script requires python3.8+. Many statements are not convertable.  
+Here are the statements that have already been implemented.
 |statement|example|
 |-|-|
 |Expr|`print((1+1)*2)`|
@@ -41,5 +41,5 @@ Here is the statements that have already been implemented.
 
 Remarks:
 1. 'AugAssign' (e.g. `a+=1`) is not implmented.
-2. 'while-else', 'for-else', 'continue' and 'break' are implmented.
+2. 'while-else', 'for-else', 'continue' and 'break' are not implmented.
 3. 'from-import' is not implmented.
