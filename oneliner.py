@@ -82,6 +82,44 @@ def convert(body,recursion=0):
         else:
             raise Exception('Unknown assign type')       
 
+    def handle_aug_assign(assign:ast.AugAssign):
+        _op_dict={
+            ast.Add:'__iadd__',
+            ast.BitAnd:'__iand__',
+            ast.FloorDiv:'__ifloordiv__',
+            ast.LShift:'__ilshift__',
+            ast.Mod:'__imod__',
+            ast.Mult:'__imul__',
+            ast.MatMult:'__imatmul__',
+            ast.BitOr:'__ior__',
+            ast.Pow:'__ipow__',
+            ast.RShift:'__irshift__',
+            ast.Sub:'__isub__',
+            ast.Div:'__itruediv__',
+            ast.BitXor:'__ixor__'
+        }
+        i_op_name=_op_dict[type(assign.op)]
+        out = ast.Expr(
+            value=ast.IfExp(
+                test=ast.Call(
+                    func=ast.Name(id='hasattr'),
+                    args=[assign.target,
+                        ast.Constant(value=i_op_name)],
+                    keywords=[]),
+                body=ast.Call(
+                    func=ast.Attribute(
+                        value=assign.target,
+                        attr=i_op_name),
+                    args=[assign.value],
+                    keywords=[]),
+                orelse=ast.NamedExpr(
+                    target=assign.target,
+                    value=ast.BinOp(
+                        left=assign.target,
+                        op=assign.op,
+                        right=assign.value))))
+        out_node.elts.append(out)
+
     for n_body,node in enumerate(body):
         if type(node)==ast.Expr:
             out_node.elts.append(node)
@@ -98,6 +136,8 @@ def convert(body,recursion=0):
             pass
         elif type(node)==ast.Assign:
             handle_assign(node)
+        elif type(node)==ast.AugAssign:
+            handle_aug_assign(node)
         elif type(node)==ast.Import:
             _name_list=[_alias.name for _alias in node.names]
             _asname_list=[_alias.asname if not _alias.asname is None
