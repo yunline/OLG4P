@@ -21,6 +21,7 @@ while y<h*2:
 ```python
 [(itertools := __import__('itertools')), (random := __import__('random')), [(__ol_assign_tmp_nxazjlgisn := (0, 2)), (y := __ol_assign_tmp_nxazjlgisn[0]), (h := __ol_assign_tmp_nxazjlgisn[1])], (msg := 'hello_world'), [[[[print(random.choice('/\\'), end='')] for x in range(len(msg) + 2)], (y := (y + 1)), [print('\n %s ' % msg)] if y == h else [print('')]] for _ in itertools.takewhile(lambda _: y < h * 2, itertools.count())]]
 ```
+![](img/2023-03-12-14-28-19.png)
 
 ## Usage
 `python oneliner.py [input file] -o [output file]`  
