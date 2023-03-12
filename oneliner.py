@@ -1,10 +1,19 @@
 import ast
+import random
+random.seed(12345)
 
 usesing_itertools=False
 filename='<string>'
 
 class ConvertError(Exception):
     pass
+
+unique_id_set={''}
+def unique_id():
+    uid=''
+    while uid in unique_id_set:
+        uid=''.join(random.choice('abcdefghijklmnopqrstuvwxyz') for i in range(10))
+    return uid
 
 def convert(body,recursion=0):
     global usesing_itertools
@@ -52,31 +61,26 @@ def convert(body,recursion=0):
                     ifs=[],
                     is_async=0)]))
 
-    def handle_assign_walrus(assign:ast.Assign):# 单个赋值，海象表达式
+    def handle_assign(assign:ast.Assign):
         _target=assign.targets[0]
         if type(_target)==ast.Name:
             out_node.elts.append(ast.NamedExpr(_target,assign.value))
-            return 0
-        return 1
-
-    def handle_assign_lambda(assign:ast.Assign):# 多重赋值，lambda嵌套
-        _target=assign.targets[0]
-        _subseq=convert(body[n_body+1:],recursion+1)
-        if type(_target)==ast.Tuple:
-            _exp=ast.Call(
-                func=ast.Lambda(
-                    args=ast.arguments(       
-                        posonlyargs=[],   
-                        args=[ast.arg(__target.id) for __target in _target.elts],
-                        kwonlyargs=[],    
-                        kw_defaults=[],
-                        defaults=[]),
-                    body=_subseq),
-                args=[ast.Starred(assign.value)],
-                keywords=[])
-            out_node.elts.append(_exp)
+        elif type(_target)==ast.Tuple:
+            tmp_variable_name='__ol_assign_tmp_'+unique_id()
+            out=ast.List(elts=[        
+                ast.NamedExpr(
+                    target=ast.Name(id=tmp_variable_name),
+                    value=assign.value)],)
+            for n,target in enumerate(_target.elts):
+                single_assign=ast.NamedExpr(
+                    target=target,
+                    value=ast.Subscript(
+                        value=ast.Name(id=tmp_variable_name),
+                        slice=ast.Constant(value=n)))
+                out.elts.append(single_assign)
+            out_node.elts.append(out)
         else:
-            raise Exception()
+            raise Exception('Unknown assign type')       
 
     for n_body,node in enumerate(body):
         if type(node)==ast.Expr:
@@ -93,9 +97,7 @@ def convert(body,recursion=0):
         elif type(node)==ast.Pass():
             pass
         elif type(node)==ast.Assign:
-            if handle_assign_walrus(node):# 如果无法使用海象表达式，则使用lambda嵌套
-                handle_assign_lambda(node)
-                break # 跳出循环，进入lambda嵌套
+            handle_assign(node)
         elif type(node)==ast.Import:
             _name_list=[_alias.name for _alias in node.names]
             _asname_list=[_alias.asname if not _alias.asname is None
@@ -107,7 +109,7 @@ def convert(body,recursion=0):
                         [ast.Constant(_name_list[n])],[]
                     )
                 )
-                handle_assign_walrus(_assign)
+                handle_assign(_assign)
         elif type(node)==ast.While:
             usesing_itertools=True
             handle_while_statement(node)
