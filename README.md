@@ -33,14 +33,17 @@ Here are the statements that have already been implemented.
 |statement|example|
 |-|-|
 |Expr|`print((1+1)*2)`|
-|Assign|`a=1` or `a,b=b,a`|
+|Assign|`a=1`<br>`a,b=b,a`|
 |AugAssign|`a*=1`|
 |If|`if a==0: ...`<br>`elif a>1: ...`<br>`else: ...`|
 |For<sub> 1</sub>|`for i in range(10): ...`|
 |While<sub> 1</sub>|`While a<100: ...`|
 |Pass|`while 1: pass`|
-|Import<sub> 2</sub>|`import math` or `import os,sys`|
+|Import<sub> 2</sub>|`import math`<br> `import os,sys`<br>`import numpy as np`|
 
 Remarks:
 1. 'while-else', 'for-else', 'continue' and 'break' are not implmented.
 2. 'from-import' is not implmented.
+
+## Dependencies
+- **CPython >= 3.9**
