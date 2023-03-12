@@ -44,3 +44,6 @@ Here are the statements that have already been implemented.
 Remarks:
 1. 'while-else', 'for-else', 'continue' and 'break' are not implmented.
 2. 'from-import' is not implmented.
+
+## Dependencies
+- **CPython >= 3.9**
