@@ -29,7 +29,7 @@ def convert(body,recursion=0):
                     ast.Constant(value='itertools')],      
                 keywords=[])))
     
-    def handle_while_statement(while_statement:ast.While):
+    def handle_while(while_statement:ast.While):
         condition=while_statement.test
         payload=convert(while_statement.body,recursion+1)
         orelse=convert(while_statement.orelse,recursion+1)
@@ -121,7 +121,7 @@ def convert(body,recursion=0):
                         right=assign.value))))
         out_node.elts.append(out)
 
-    def handle_for_statement(for_statement:ast.For):
+    def handle_for(for_statement:ast.For):
         elt=convert(node.body,recursion+1)
         out=ast.ListComp(
             elt=elt,
@@ -133,11 +133,25 @@ def convert(body,recursion=0):
                     is_async=False)])
         out_node.elts.append(out)
 
+    def handle_import(import_statement:ast.Import):
+        name_list=[alias.name for alias in node.names]
+        asname_list=[alias.asname if not alias.asname is None
+            else alias.name for alias in node.names]
+
+        for n,asname in enumerate(asname_list):
+            out=ast.NamedExpr(
+                target=ast.Name(asname),
+                value=ast.Call(
+                    func=ast.Name('__import__'),
+                    args=[ast.Constant(name_list[n])],
+                    keywords=[]))
+            out_node.elts.append(out)
+
     for n_body,node in enumerate(body):
         if type(node)==ast.Expr:
             out_node.elts.append(node)
         elif type(node)==ast.For:
-            handle_for_statement(node)
+            handle_for(node)
         elif type(node)==ast.If:
             _body=convert(node.body,recursion+1)
             _orelse=convert(node.orelse,recursion+1)
@@ -150,20 +164,10 @@ def convert(body,recursion=0):
         elif type(node)==ast.AugAssign:
             handle_aug_assign(node)
         elif type(node)==ast.Import:
-            _name_list=[_alias.name for _alias in node.names]
-            _asname_list=[_alias.asname if not _alias.asname is None
-                else _alias.name for _alias in node.names]
-
-            for n,_id in enumerate(_asname_list):
-                _assign=ast.Assign([ast.Name(_id)],
-                    ast.Call(ast.Name('__import__'),
-                        [ast.Constant(_name_list[n])],[]
-                    )
-                )
-                handle_assign(_assign)
+            handle_import(node)
         elif type(node)==ast.While:
             usesing_itertools=True
-            handle_while_statement(node)
+            handle_while(node)
         else:
             raise ConvertError('Convert failed.\nError: "%s", line %d, Statement "%s" is not convertable.'\
                     %(filename,node.lineno,type(node).__name__))
