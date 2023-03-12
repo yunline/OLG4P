@@ -33,7 +33,7 @@ def convert(body,recursion=0):
         condition=while_statement.test
         payload=convert(while_statement.body,recursion+1)
         orelse=convert(while_statement.orelse,recursion+1)
-        out_node.elts.append(ast.ListComp(
+        out=ast.ListComp(
             elt=payload,
             generators=[
                 ast.comprehension(
@@ -59,7 +59,8 @@ def convert(body,recursion=0):
                                 keywords=[])],
                         keywords=[]),
                     ifs=[],
-                    is_async=0)]))
+                    is_async=0)])
+        out_node.elts.append(out)
 
     def handle_assign(assign:ast.Assign):
         _target=assign.targets[0]
@@ -120,13 +121,23 @@ def convert(body,recursion=0):
                         right=assign.value))))
         out_node.elts.append(out)
 
+    def handle_for_statement(for_statement:ast.For):
+        elt=convert(node.body,recursion+1)
+        out=ast.ListComp(
+            elt=elt,
+            generators=[
+                ast.comprehension(
+                    target=node.target,
+                    iter=node.iter,
+                    ifs=[],
+                    is_async=False)])
+        out_node.elts.append(out)
+
     for n_body,node in enumerate(body):
         if type(node)==ast.Expr:
             out_node.elts.append(node)
         elif type(node)==ast.For:
-            elt=convert(node.body,recursion+1)
-            _exp=ast.ListComp(elt,[ast.comprehension(node.target,node.iter,[],False)])
-            out_node.elts.append(_exp)
+            handle_for_statement(node)
         elif type(node)==ast.If:
             _body=convert(node.body,recursion+1)
             _orelse=convert(node.orelse,recursion+1)
