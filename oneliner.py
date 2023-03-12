@@ -161,6 +161,9 @@ def convert(body,recursion=0):
             pass
         elif type(node)==ast.Assign:
             handle_assign(node)
+        elif type(node)==ast.AnnAssign:
+            out_node.elts.append(
+                ast.NamedExpr(node.target,node.value))
         elif type(node)==ast.AugAssign:
             handle_aug_assign(node)
         elif type(node)==ast.Import:
