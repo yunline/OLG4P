@@ -132,7 +132,7 @@ def convert(body,recursion=0):
             _orelse=convert(node.orelse,recursion+1)
             _exp=ast.IfExp(node.test,_body,_orelse)
             out_node.elts.append(_exp)
-        elif type(node)==ast.Pass():
+        elif type(node)==ast.Pass:
             pass
         elif type(node)==ast.Assign:
             handle_assign(node)
@@ -159,6 +159,16 @@ def convert(body,recursion=0):
     
     if recursion==0 and usesing_itertools:
         inject_itertools()
+
+    # Output optimizing
+    if len(out_node.elts)==0:
+        out_node=ast.Expr(value=ast.Constant(value=None))
+    elif len(out_node.elts)==1:
+        _value=out_node.elts[0]
+        if type(_value)==ast.Expr:
+            out_node=_value
+        else:
+            out_node=ast.Expr(value=_value)
 
     return out_node
 
