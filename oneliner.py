@@ -147,16 +147,26 @@ def convert(body,recursion=0):
                     keywords=[]))
             out_node.elts.append(out)
 
+    def handle_if(if_statement:ast.If):
+        body=convert(if_statement.body,recursion+1)
+        orelse=convert(if_statement.orelse,recursion+1)
+        out=ast.IfExp(if_statement.test,body,orelse)
+        out_node.elts.append(out)
+
+    def post_process(out_node): # Output optimization
+        if len(out_node.elts)==0:
+            out_node=ast.Expr(value=ast.Constant(value=None))
+        elif len(out_node.elts)==1:
+            out_node=out_node.elts[0]
+        return out_node
+
     for n_body,node in enumerate(body):
         if type(node)==ast.Expr:
             out_node.elts.append(node)
         elif type(node)==ast.For:
             handle_for(node)
         elif type(node)==ast.If:
-            _body=convert(node.body,recursion+1)
-            _orelse=convert(node.orelse,recursion+1)
-            _exp=ast.IfExp(node.test,_body,_orelse)
-            out_node.elts.append(_exp)
+            handle_if(node)
         elif type(node)==ast.Pass:
             pass
         elif type(node)==ast.Assign:
@@ -178,15 +188,7 @@ def convert(body,recursion=0):
     if recursion==0 and usesing_itertools:
         inject_itertools()
 
-    # Output optimizing
-    if len(out_node.elts)==0:
-        out_node=ast.Expr(value=ast.Constant(value=None))
-    elif len(out_node.elts)==1:
-        _value=out_node.elts[0]
-        if type(_value)==ast.Expr:
-            out_node=_value
-        else:
-            out_node=ast.Expr(value=_value)
+    out_node=post_process(out_node)
 
     return out_node
 
