@@ -265,7 +265,7 @@ def convert(body: list,recursion: int=0):
             handle_for(node)
         elif type(node)==ast.If:
             handle_if(node)
-            if loop_control_stack[-1][3] and body[n_body+1:]: 
+            if loop_control_stack and loop_control_stack[-1][3] and body[n_body+1:]: 
                 # 如果在分支中有continue/break且分支后还有语句
                 # 则判断是否中断，再执行
                 out_node.elts.append(
