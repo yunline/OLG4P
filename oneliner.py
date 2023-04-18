@@ -16,9 +16,15 @@ def unique_id():
     return uid
 
 class Converter:
-    def __init__(self):
+    def __init__(self,isfunc=False):
+        self.isfunc=isfunc
         self.loop_control_stack=[]
         # [[break_obj, continue_obj, have_break, have_continue], ...]
+        if isfunc:
+            _id=unique_id()
+            self.not_return=ast.Name(id='__ol_not_return_'+_id)
+            self.return_value=ast.Name(id='__ol_return_value_'+_id)
+            self.have_return=False
 
     def convert(self, body: list,recursion: int=0):
         out_node=ast.List([])
@@ -66,6 +72,11 @@ class Converter:
                     ast.NamedExpr(
                         target=not_break,
                         value=ast.Constant(value=True)))
+            
+            if self.isfunc and self.have_return: # 如果包含return
+                condition=ast.BoolOp(
+                    op=ast.And(),
+                    values=[self.not_return,condition])
         
             out=ast.ListComp(
                 elt=payload,
@@ -168,6 +179,7 @@ class Converter:
             out_node.elts.append(out)
 
         def handle_for(for_statement:ast.For):
+            global usesing_itertools
             _id=unique_id()
             not_break=ast.Name(id='__ol_not_brk_'+_id)
             not_continue=ast.Name(id='__ol_not_cont_'+_id)
@@ -180,8 +192,6 @@ class Converter:
             indicator=self.loop_control_stack.pop() # 弹出中断指示器
 
             if indicator[3]: # 如果包含continue/break
-                global usesing_itertools
-                usesing_itertools=True
                 reset_continue=ast.NamedExpr(
                     target=not_continue,
                     value=ast.Constant(value=True))
@@ -191,7 +201,15 @@ class Converter:
                 else:
                     payload=ast.List(elts=[reset_continue,payload])
 
-            if indicator[2]: # 如果包含break
+            if indicator[2] or (self.isfunc and self.have_return): # 如果包含break/return
+                usesing_itertools=True
+                not_interrupt=ast.BoolOp(
+                    op=ast.And(),
+                    values=[])
+                if indicator[2]:
+                    not_interrupt.values.append(not_break)
+                if (self.isfunc and self.have_return):
+                    not_interrupt.values.append(self.not_return)
                 _iter=ast.Call(
                     func=ast.Attribute(
                         value=ast.Name(id='itertools'),
@@ -205,10 +223,11 @@ class Converter:
                                 kwonlyargs=[],
                                 kw_defaults=[],
                                 defaults=[]),
-                            body=not_break),
+                            body=not_interrupt),
                         _iter],
                     keywords=[])
-                
+
+            if indicator[2]: # 如果包含break, 初始化break变量
                 out_node.elts.append(
                     ast.NamedExpr(
                         target=not_break,
@@ -256,14 +275,14 @@ class Converter:
             out=ast.IfExp(if_statement.test,body,orelse)
             out_node.elts.append(out)
 
-        def handle_continue(continue_statement:ast.Continue):
+        def handle_continue():
             self.loop_control_stack[-1][3]=True # have continue
             out_node.elts.append(
                 ast.NamedExpr(
                     target=self.loop_control_stack[-1][1],
                     value=ast.Constant(value=False)))
         
-        def handle_break(continue_statement:ast.Continue):
+        def handle_break():
             self.loop_control_stack[-1][2]=True # have break
             self.loop_control_stack[-1][3]=True # break includes continue
             out_node.elts.append(
@@ -274,6 +293,28 @@ class Converter:
                 ast.NamedExpr(
                     target=self.loop_control_stack[-1][0],
                     value=ast.Constant(value=False)))
+        
+        def handle_def(def_statement:ast.FunctionDef):
+            converter=Converter(isfunc=True)
+            out=ast.NamedExpr(
+                    target=ast.Name(id=def_statement.name),
+                    value=ast.Lambda(
+                        args=def_statement.args,
+                        body=converter.convert(def_statement.body,0)
+                    ))
+            out_node.elts.append(out)
+        
+        def handle_return(return_statement:ast.Return):
+            self.have_return=True
+            out_node.elts.append(
+                ast.NamedExpr(
+                    target=self.not_return,
+                    value=ast.Constant(value=False)))
+                    
+            out_node.elts.append(
+                ast.NamedExpr(
+                    target=self.return_value,
+                    value=return_statement.value))
 
         def post_process(out_node): # Output optimization
             if len(out_node.elts)==0:
@@ -289,15 +330,6 @@ class Converter:
                 handle_for(node)
             elif type(node)==ast.If:
                 handle_if(node)
-                if self.loop_control_stack and self.loop_control_stack[-1][3] and body[n_body+1:]: 
-                    # 如果在分支中有continue/break且分支后还有语句
-                    # 则判断是否中断，再执行
-                    out_node.elts.append(
-                        ast.IfExp(
-                            test=self.loop_control_stack[-1][1],
-                            body=self.convert(body[n_body+1:],recursion+1),
-                            orelse=ast.Constant(value=None)))
-                    break
             elif type(node)==ast.Pass:
                 pass
             elif type(node)==ast.Assign:
@@ -312,17 +344,62 @@ class Converter:
             elif type(node)==ast.While:
                 handle_while(node)
             elif type(node)==ast.Continue:
-                handle_continue(node)
+                handle_continue()
                 break # 中断
             elif type(node)==ast.Break:
-                handle_break(node)
+                handle_break()
                 break
+            elif type(node)==ast.Return:
+                handle_return(node)
+                break
+            elif type(node)==ast.FunctionDef:
+                handle_def(node)
             else:
                 raise ConvertError('Convert failed.\nError: "%s", line %d, Statement "%s" is not convertable.'\
                         %(filename,node.lineno,type(node).__name__))
+            
+            if body[n_body+1:]:
+                # 如果在分支中有continue/break/return且之后还有语句
+                # 则判断是否中断，再执行
+                if type(node) == ast.If:
+                    if self.loop_control_stack and self.loop_control_stack[-1][3]: 
+                        out_node.elts.append(
+                            ast.IfExp(
+                                test=self.loop_control_stack[-1][1],
+                                body=self.convert(body[n_body+1:],recursion+1),
+                                orelse=ast.Constant(value=None)))
+                    if not self.isfunc:
+                        break
+                if self.isfunc and type(node) in [ast.For,ast.While,ast.If]:
+                    if self.have_return:
+                        out_node.elts.append(
+                            ast.IfExp(
+                                test=self.not_return,
+                                body=self.convert(body[n_body+1:],recursion+1),
+                                orelse=ast.Constant(value=None)))
+                    break
         
-        if recursion==0 and usesing_itertools:
-            inject_itertools()
+        if recursion==0:
+            if self.isfunc:
+                if self.have_return:
+                    out_node.elts.insert(0, 
+                        ast.NamedExpr(
+                            target=self.not_return,
+                            value=ast.Constant(value=True)))
+
+                out_node.elts.insert(0,
+                    ast.NamedExpr(
+                        target=self.return_value,
+                        value=ast.Constant(value=None)))
+                
+                out_node=ast.List(elts=[
+                    ast.Expr(
+                        value=ast.Subscript(
+                            value=ast.List(elts=[out_node,self.return_value]),
+                            slice=ast.Constant(value=-1)))])
+                
+            elif usesing_itertools:
+                inject_itertools()
 
         out_node=post_process(out_node)
 
