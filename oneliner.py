@@ -14,317 +14,319 @@ def unique_id():
     while uid in unique_id_set:
         uid=''.join(random.choice('abcdefghijklmnopqrstuvwxyz') for i in range(10))
     return uid
-                    
-loop_control_stack=[]
-# [[break_obj, continue_obj, have_break, have_continue], ...]
 
-def convert(body: list,recursion: int=0):
-    out_node=ast.List([])
+class Converter:
+    def __init__(self):
+        self.loop_control_stack=[]
+        # [[break_obj, continue_obj, have_break, have_continue], ...]
 
-    def inject_itertools():
-        out_node.elts.insert(0,ast.NamedExpr(
-            target=ast.Name(id='itertools'),  
-            value=ast.Call(
-                func=ast.Name(id='__import__'),
-                args=[
-                    ast.Constant(value='itertools')],      
-                keywords=[])))
-    
-    def handle_while(while_statement:ast.While):
-        global usesing_itertools
-        usesing_itertools=True
+    def convert(self, body: list,recursion: int=0):
+        out_node=ast.List([])
 
-        _id=unique_id()
-        not_break=ast.Name(id='__ol_not_brk_'+_id)
-        not_continue=ast.Name(id='__ol_not_cont_'+_id)
-        # 中断指示器入栈
-        loop_control_stack.append([not_break,not_continue,False,False])
-
-        condition=while_statement.test
-        payload=convert(while_statement.body,recursion+1)
-
-        indicator=loop_control_stack.pop() # 弹出中断指示器
+        def inject_itertools():
+            out_node.elts.insert(0,ast.NamedExpr(
+                target=ast.Name(id='itertools'),  
+                value=ast.Call(
+                    func=ast.Name(id='__import__'),
+                    args=[
+                        ast.Constant(value='itertools')],      
+                    keywords=[])))
         
-        if indicator[3]: # 如果包含continue/break
-            reset_continue=ast.NamedExpr(
-                target=not_continue,
-                value=ast.Constant(value=True))
-
-            if isinstance(payload,ast.List):
-                payload.elts.insert(0,reset_continue)
-            else:
-                payload=ast.List(elts=[reset_continue,payload])
-
-        if indicator[2]: # 如果包含break
-            condition=ast.BoolOp(
-                op=ast.And(),
-                values=[not_break,condition])
-            
-            out_node.elts.append(
-                ast.NamedExpr(
-                    target=not_break,
-                    value=ast.Constant(value=True)))
-    
-        out=ast.ListComp(
-            elt=payload,
-            generators=[
-                ast.comprehension(
-                    target=ast.Name(id='_'),
-                    iter=ast.Call(
-                        func=ast.Attribute(
-                            value=ast.Name(id='itertools'),
-                            attr='takewhile'),
-                        args=[
-                            ast.Lambda(
-                                args=ast.arguments(
-                                    posonlyargs=[],
-                                    args=[ast.arg(arg='_')],
-                                    kwonlyargs=[],
-                                    kw_defaults=[],
-                                    defaults=[]),
-                                body=condition),
-                            ast.Call(
-                                func=ast.Attribute(
-                                    value=ast.Name(id='itertools'),
-                                    attr='count'),
-                                args=[],
-                                keywords=[])],
-                        keywords=[]),
-                    ifs=[],
-                    is_async=0)])
-        out_node.elts.append(out)
-
-        if while_statement.orelse:
-            if indicator[2]: #if have break
-                orelse=convert([
-                    ast.If(
-                        test=not_break,
-                        body=while_statement.orelse,
-                        orelse=[])]
-                    ,recursion+1)
-            else:
-                orelse=convert(while_statement.orelse,recursion+1)
-            out_node.elts.append(orelse)
-
-    def handle_assign(assign:ast.Assign):
-        _target=assign.targets[0]
-        if type(_target)==ast.Name:
-            out_node.elts.append(ast.NamedExpr(_target,assign.value))
-        elif type(_target)==ast.Tuple:
-            tmp_variable_name='__ol_assign_tmp_'+unique_id()
-            out=ast.List(elts=[        
-                ast.NamedExpr(
-                    target=ast.Name(id=tmp_variable_name),
-                    value=assign.value)],)
-            for n,target in enumerate(_target.elts):
-                single_assign=ast.NamedExpr(
-                    target=target,
-                    value=ast.Subscript(
-                        value=ast.Name(id=tmp_variable_name),
-                        slice=ast.Constant(value=n)))
-                out.elts.append(single_assign)
-            out_node.elts.append(out)
-        else:
-            raise Exception('Unknown assign type')       
-
-    def handle_aug_assign(assign:ast.AugAssign):
-        _op_dict={
-            ast.Add:'__iadd__',
-            ast.BitAnd:'__iand__',
-            ast.FloorDiv:'__ifloordiv__',
-            ast.LShift:'__ilshift__',
-            ast.Mod:'__imod__',
-            ast.Mult:'__imul__',
-            ast.MatMult:'__imatmul__',
-            ast.BitOr:'__ior__',
-            ast.Pow:'__ipow__',
-            ast.RShift:'__irshift__',
-            ast.Sub:'__isub__',
-            ast.Div:'__itruediv__',
-            ast.BitXor:'__ixor__'
-        }
-        i_op_name=_op_dict[type(assign.op)]
-        out = ast.Expr(
-            value=ast.IfExp(
-                test=ast.Call(
-                    func=ast.Name(id='hasattr'),
-                    args=[assign.target,
-                        ast.Constant(value=i_op_name)],
-                    keywords=[]),
-                body=ast.Call(
-                    func=ast.Attribute(
-                        value=assign.target,
-                        attr=i_op_name),
-                    args=[assign.value],
-                    keywords=[]),
-                orelse=ast.NamedExpr(
-                    target=assign.target,
-                    value=ast.BinOp(
-                        left=assign.target,
-                        op=assign.op,
-                        right=assign.value))))
-        out_node.elts.append(out)
-
-    def handle_for(for_statement:ast.For):
-        _id=unique_id()
-        not_break=ast.Name(id='__ol_not_brk_'+_id)
-        not_continue=ast.Name(id='__ol_not_cont_'+_id)
-        # 中断指示器入栈
-        loop_control_stack.append([not_break,not_continue,False,False])
-
-        payload=convert(node.body,recursion+1)
-        _iter=node.iter
-
-        indicator=loop_control_stack.pop() # 弹出中断指示器
-
-        if indicator[3]: # 如果包含continue/break
+        def handle_while(while_statement:ast.While):
             global usesing_itertools
             usesing_itertools=True
-            reset_continue=ast.NamedExpr(
-                target=not_continue,
-                value=ast.Constant(value=True))
 
-            if isinstance(payload,ast.List):
-                payload.elts.insert(0,reset_continue)
-            else:
-                payload=ast.List(elts=[reset_continue,payload])
+            _id=unique_id()
+            not_break=ast.Name(id='__ol_not_brk_'+_id)
+            not_continue=ast.Name(id='__ol_not_cont_'+_id)
+            # 中断指示器入栈
+            self.loop_control_stack.append([not_break,not_continue,False,False])
 
-        if indicator[2]: # 如果包含break
-            _iter=ast.Call(
-                func=ast.Attribute(
-                    value=ast.Name(id='itertools'),
-                    attr='takewhile'),
-                args=[
-                    ast.Lambda(
-                        args=ast.arguments(
-                            posonlyargs=[],
-                            args=[
-                                ast.arg(arg='_')],
-                            kwonlyargs=[],
-                            kw_defaults=[],
-                            defaults=[]),
-                        body=not_break),
-                    _iter],
-                keywords=[])
+            condition=while_statement.test
+            payload=self.convert(while_statement.body,recursion+1)
+
+            indicator=self.loop_control_stack.pop() # 弹出中断指示器
             
-            out_node.elts.append(
-                ast.NamedExpr(
-                    target=not_break,
-                    value=ast.Constant(value=True)))
+            if indicator[3]: # 如果包含continue/break
+                reset_continue=ast.NamedExpr(
+                    target=not_continue,
+                    value=ast.Constant(value=True))
 
-        out=ast.ListComp(
-            elt=payload,
-            generators=[
-                ast.comprehension(
-                    target=node.target,
-                    iter=_iter,
-                    ifs=[],
-                    is_async=False)])
-        out_node.elts.append(out)
+                if isinstance(payload,ast.List):
+                    payload.elts.insert(0,reset_continue)
+                else:
+                    payload=ast.List(elts=[reset_continue,payload])
 
-        if node.orelse:
-            if indicator[2]: #if have break
-                orelse=convert([
-                    ast.If(
-                        test=not_break,
-                        body=node.orelse,
-                        orelse=[])]
-                    ,recursion+1)
-            else:
-                orelse=convert(node.orelse,recursion+1)
-            out_node.elts.append(orelse)
-
-    def handle_import(import_statement:ast.Import):
-        name_list=[alias.name for alias in node.names]
-        asname_list=[alias.asname if not alias.asname is None
-            else alias.name for alias in node.names]
-
-        for n,asname in enumerate(asname_list):
-            out=ast.NamedExpr(
-                target=ast.Name(asname),
-                value=ast.Call(
-                    func=ast.Name('__import__'),
-                    args=[ast.Constant(name_list[n])],
-                    keywords=[]))
+            if indicator[2]: # 如果包含break
+                condition=ast.BoolOp(
+                    op=ast.And(),
+                    values=[not_break,condition])
+                
+                out_node.elts.append(
+                    ast.NamedExpr(
+                        target=not_break,
+                        value=ast.Constant(value=True)))
+        
+            out=ast.ListComp(
+                elt=payload,
+                generators=[
+                    ast.comprehension(
+                        target=ast.Name(id='_'),
+                        iter=ast.Call(
+                            func=ast.Attribute(
+                                value=ast.Name(id='itertools'),
+                                attr='takewhile'),
+                            args=[
+                                ast.Lambda(
+                                    args=ast.arguments(
+                                        posonlyargs=[],
+                                        args=[ast.arg(arg='_')],
+                                        kwonlyargs=[],
+                                        kw_defaults=[],
+                                        defaults=[]),
+                                    body=condition),
+                                ast.Call(
+                                    func=ast.Attribute(
+                                        value=ast.Name(id='itertools'),
+                                        attr='count'),
+                                    args=[],
+                                    keywords=[])],
+                            keywords=[]),
+                        ifs=[],
+                        is_async=0)])
             out_node.elts.append(out)
 
-    def handle_if(if_statement:ast.If):
-        body=convert(if_statement.body,recursion+1)
-        orelse=convert(if_statement.orelse,recursion+1)
-        out=ast.IfExp(if_statement.test,body,orelse)
-        out_node.elts.append(out)
+            if while_statement.orelse:
+                if indicator[2]: #if have break
+                    orelse=self.convert([
+                        ast.If(
+                            test=not_break,
+                            body=while_statement.orelse,
+                            orelse=[])]
+                        ,recursion+1)
+                else:
+                    orelse=self.convert(while_statement.orelse,recursion+1)
+                out_node.elts.append(orelse)
 
-    def handle_continue(continue_statement:ast.Continue):
-        loop_control_stack[-1][3]=True # have continue
-        out_node.elts.append(
-            ast.NamedExpr(
-                target=loop_control_stack[-1][1],
-                value=ast.Constant(value=False)))
-    
-    def handle_break(continue_statement:ast.Continue):
-        loop_control_stack[-1][2]=True # have break
-        loop_control_stack[-1][3]=True # break includes continue
-        out_node.elts.append(
-            ast.NamedExpr(
-                target=loop_control_stack[-1][1],
-                value=ast.Constant(value=False)))
-        out_node.elts.append(
-            ast.NamedExpr(
-                target=loop_control_stack[-1][0],
-                value=ast.Constant(value=False)))
+        def handle_assign(assign:ast.Assign):
+            _target=assign.targets[0]
+            if type(_target)==ast.Name:
+                out_node.elts.append(ast.NamedExpr(_target,assign.value))
+            elif type(_target)==ast.Tuple:
+                tmp_variable_name='__ol_assign_tmp_'+unique_id()
+                out=ast.List(elts=[        
+                    ast.NamedExpr(
+                        target=ast.Name(id=tmp_variable_name),
+                        value=assign.value)],)
+                for n,target in enumerate(_target.elts):
+                    single_assign=ast.NamedExpr(
+                        target=target,
+                        value=ast.Subscript(
+                            value=ast.Name(id=tmp_variable_name),
+                            slice=ast.Constant(value=n)))
+                    out.elts.append(single_assign)
+                out_node.elts.append(out)
+            else:
+                raise Exception('Unknown assign type')       
 
-    def post_process(out_node): # Output optimization
-        if len(out_node.elts)==0:
-            out_node=ast.Expr(value=ast.Constant(value=None))
-        elif len(out_node.elts)==1:
-            out_node=out_node.elts[0]
-        return out_node
+        def handle_aug_assign(assign:ast.AugAssign):
+            _op_dict={
+                ast.Add:'__iadd__',
+                ast.BitAnd:'__iand__',
+                ast.FloorDiv:'__ifloordiv__',
+                ast.LShift:'__ilshift__',
+                ast.Mod:'__imod__',
+                ast.Mult:'__imul__',
+                ast.MatMult:'__imatmul__',
+                ast.BitOr:'__ior__',
+                ast.Pow:'__ipow__',
+                ast.RShift:'__irshift__',
+                ast.Sub:'__isub__',
+                ast.Div:'__itruediv__',
+                ast.BitXor:'__ixor__'
+            }
+            i_op_name=_op_dict[type(assign.op)]
+            out = ast.Expr(
+                value=ast.IfExp(
+                    test=ast.Call(
+                        func=ast.Name(id='hasattr'),
+                        args=[assign.target,
+                            ast.Constant(value=i_op_name)],
+                        keywords=[]),
+                    body=ast.Call(
+                        func=ast.Attribute(
+                            value=assign.target,
+                            attr=i_op_name),
+                        args=[assign.value],
+                        keywords=[]),
+                    orelse=ast.NamedExpr(
+                        target=assign.target,
+                        value=ast.BinOp(
+                            left=assign.target,
+                            op=assign.op,
+                            right=assign.value))))
+            out_node.elts.append(out)
 
-    for n_body,node in enumerate(body):
-        if type(node)==ast.Expr:
-            out_node.elts.append(node)
-        elif type(node)==ast.For:
-            handle_for(node)
-        elif type(node)==ast.If:
-            handle_if(node)
-            if loop_control_stack and loop_control_stack[-1][3] and body[n_body+1:]: 
-                # 如果在分支中有continue/break且分支后还有语句
-                # 则判断是否中断，再执行
+        def handle_for(for_statement:ast.For):
+            _id=unique_id()
+            not_break=ast.Name(id='__ol_not_brk_'+_id)
+            not_continue=ast.Name(id='__ol_not_cont_'+_id)
+            # 中断指示器入栈
+            self.loop_control_stack.append([not_break,not_continue,False,False])
+
+            payload=self.convert(node.body,recursion+1)
+            _iter=node.iter
+
+            indicator=self.loop_control_stack.pop() # 弹出中断指示器
+
+            if indicator[3]: # 如果包含continue/break
+                global usesing_itertools
+                usesing_itertools=True
+                reset_continue=ast.NamedExpr(
+                    target=not_continue,
+                    value=ast.Constant(value=True))
+
+                if isinstance(payload,ast.List):
+                    payload.elts.insert(0,reset_continue)
+                else:
+                    payload=ast.List(elts=[reset_continue,payload])
+
+            if indicator[2]: # 如果包含break
+                _iter=ast.Call(
+                    func=ast.Attribute(
+                        value=ast.Name(id='itertools'),
+                        attr='takewhile'),
+                    args=[
+                        ast.Lambda(
+                            args=ast.arguments(
+                                posonlyargs=[],
+                                args=[
+                                    ast.arg(arg='_')],
+                                kwonlyargs=[],
+                                kw_defaults=[],
+                                defaults=[]),
+                            body=not_break),
+                        _iter],
+                    keywords=[])
+                
                 out_node.elts.append(
-                    ast.IfExp(
-                        test=loop_control_stack[-1][1],
-                        body=convert(body[n_body+1:],recursion+1),
-                        orelse=ast.Constant(value=None)))
-                break
-        elif type(node)==ast.Pass:
-            pass
-        elif type(node)==ast.Assign:
-            handle_assign(node)
-        elif type(node)==ast.AnnAssign:
+                    ast.NamedExpr(
+                        target=not_break,
+                        value=ast.Constant(value=True)))
+
+            out=ast.ListComp(
+                elt=payload,
+                generators=[
+                    ast.comprehension(
+                        target=node.target,
+                        iter=_iter,
+                        ifs=[],
+                        is_async=False)])
+            out_node.elts.append(out)
+
+            if node.orelse:
+                if indicator[2]: #if have break
+                    orelse=self.convert([
+                        ast.If(
+                            test=not_break,
+                            body=node.orelse,
+                            orelse=[])]
+                        ,recursion+1)
+                else:
+                    orelse=self.convert(node.orelse,recursion+1)
+                out_node.elts.append(orelse)
+
+        def handle_import(import_statement:ast.Import):
+            name_list=[alias.name for alias in node.names]
+            asname_list=[alias.asname if not alias.asname is None
+                else alias.name for alias in node.names]
+
+            for n,asname in enumerate(asname_list):
+                out=ast.NamedExpr(
+                    target=ast.Name(asname),
+                    value=ast.Call(
+                        func=ast.Name('__import__'),
+                        args=[ast.Constant(name_list[n])],
+                        keywords=[]))
+                out_node.elts.append(out)
+
+        def handle_if(if_statement:ast.If):
+            body=self.convert(if_statement.body,recursion+1)
+            orelse=self.convert(if_statement.orelse,recursion+1)
+            out=ast.IfExp(if_statement.test,body,orelse)
+            out_node.elts.append(out)
+
+        def handle_continue(continue_statement:ast.Continue):
+            self.loop_control_stack[-1][3]=True # have continue
             out_node.elts.append(
-                ast.NamedExpr(node.target,node.value))
-        elif type(node)==ast.AugAssign:
-            handle_aug_assign(node)
-        elif type(node)==ast.Import:
-            handle_import(node)
-        elif type(node)==ast.While:
-            handle_while(node)
-        elif type(node)==ast.Continue:
-            handle_continue(node)
-            break # 中断
-        elif type(node)==ast.Break:
-            handle_break(node)
-            break
-        else:
-            raise ConvertError('Convert failed.\nError: "%s", line %d, Statement "%s" is not convertable.'\
-                    %(filename,node.lineno,type(node).__name__))
-    
-    if recursion==0 and usesing_itertools:
-        inject_itertools()
+                ast.NamedExpr(
+                    target=self.loop_control_stack[-1][1],
+                    value=ast.Constant(value=False)))
+        
+        def handle_break(continue_statement:ast.Continue):
+            self.loop_control_stack[-1][2]=True # have break
+            self.loop_control_stack[-1][3]=True # break includes continue
+            out_node.elts.append(
+                ast.NamedExpr(
+                    target=self.loop_control_stack[-1][1],
+                    value=ast.Constant(value=False)))
+            out_node.elts.append(
+                ast.NamedExpr(
+                    target=self.loop_control_stack[-1][0],
+                    value=ast.Constant(value=False)))
 
-    out_node=post_process(out_node)
+        def post_process(out_node): # Output optimization
+            if len(out_node.elts)==0:
+                out_node=ast.Expr(value=ast.Constant(value=None))
+            elif len(out_node.elts)==1:
+                out_node=out_node.elts[0]
+            return out_node
 
-    return out_node
+        for n_body,node in enumerate(body):
+            if type(node)==ast.Expr:
+                out_node.elts.append(node)
+            elif type(node)==ast.For:
+                handle_for(node)
+            elif type(node)==ast.If:
+                handle_if(node)
+                if self.loop_control_stack and self.loop_control_stack[-1][3] and body[n_body+1:]: 
+                    # 如果在分支中有continue/break且分支后还有语句
+                    # 则判断是否中断，再执行
+                    out_node.elts.append(
+                        ast.IfExp(
+                            test=self.loop_control_stack[-1][1],
+                            body=self.convert(body[n_body+1:],recursion+1),
+                            orelse=ast.Constant(value=None)))
+                    break
+            elif type(node)==ast.Pass:
+                pass
+            elif type(node)==ast.Assign:
+                handle_assign(node)
+            elif type(node)==ast.AnnAssign:
+                out_node.elts.append(
+                    ast.NamedExpr(node.target,node.value))
+            elif type(node)==ast.AugAssign:
+                handle_aug_assign(node)
+            elif type(node)==ast.Import:
+                handle_import(node)
+            elif type(node)==ast.While:
+                handle_while(node)
+            elif type(node)==ast.Continue:
+                handle_continue(node)
+                break # 中断
+            elif type(node)==ast.Break:
+                handle_break(node)
+                break
+            else:
+                raise ConvertError('Convert failed.\nError: "%s", line %d, Statement "%s" is not convertable.'\
+                        %(filename,node.lineno,type(node).__name__))
+        
+        if recursion==0 and usesing_itertools:
+            inject_itertools()
+
+        out_node=post_process(out_node)
+
+        return out_node
 
 if __name__=='__main__':
     import sys
@@ -377,7 +379,8 @@ Options:
         script=input_file.read()
 
     main_body=ast.parse(script)
-    result=ast.unparse(convert(main_body.body)).replace('\n', '')
+    c=Converter()
+    result=ast.unparse(c.convert(main_body.body)).replace('\n', '')
     
     if output_file_name:
         with open(output_file_name,'w') as output_file:
