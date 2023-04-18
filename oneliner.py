@@ -14,10 +14,11 @@ def unique_id():
     while uid in unique_id_set:
         uid=''.join(random.choice('abcdefghijklmnopqrstuvwxyz') for i in range(10))
     return uid
+                    
+loop_control_stack=[]
+# [[break_obj, continue_obj, have_break, have_continue], ...]
 
-def convert(body,recursion=0):
-    global usesing_itertools
-
+def convert(body: list,recursion: int=0):
     out_node=ast.List([])
 
     def inject_itertools():
@@ -30,9 +31,41 @@ def convert(body,recursion=0):
                 keywords=[])))
     
     def handle_while(while_statement:ast.While):
+        global usesing_itertools
+        usesing_itertools=True
+
+        _id=unique_id()
+        not_break=ast.Name(id='__ol_not_brk_'+_id)
+        not_continue=ast.Name(id='__ol_not_cont_'+_id)
+        # 中断指示器入栈
+        loop_control_stack.append([not_break,not_continue,False,False])
+
         condition=while_statement.test
         payload=convert(while_statement.body,recursion+1)
         orelse=convert(while_statement.orelse,recursion+1)
+        
+        if loop_control_stack[-1][3]: # 如果包含continue
+            reset_continue=ast.NamedExpr(
+                target=not_continue,
+                value=ast.Constant(value=True))
+
+            if isinstance(payload,ast.List):
+                payload.elts.insert(0,reset_continue)
+            else:
+                payload=ast.List(elts=[reset_continue,payload])
+
+        if loop_control_stack[-1][2]: # 如果包含break
+            condition=ast.BoolOp(
+                op=ast.And(),
+                values=[not_break,condition])
+            
+            out_node.elts.append(
+                ast.NamedExpr(
+                    target=not_break,
+                    value=ast.Constant(value=True)))
+        
+        loop_control_stack.pop() # 弹出中断指示器
+    
         out=ast.ListComp(
             elt=payload,
             generators=[
@@ -60,6 +93,7 @@ def convert(body,recursion=0):
                         keywords=[]),
                     ifs=[],
                     is_async=0)])
+
         out_node.elts.append(out)
 
     def handle_assign(assign:ast.Assign):
@@ -122,13 +156,58 @@ def convert(body,recursion=0):
         out_node.elts.append(out)
 
     def handle_for(for_statement:ast.For):
-        elt=convert(node.body,recursion+1)
+        _id=unique_id()
+        not_break=ast.Name(id='__ol_not_brk_'+_id)
+        not_continue=ast.Name(id='__ol_not_cont_'+_id)
+        # 中断指示器入栈
+        loop_control_stack.append([not_break,not_continue,False,False])
+
+        payload=convert(node.body,recursion+1)
+        _iter=node.iter
+
+        if loop_control_stack[-1][3]: # 如果包含continue
+            global usesing_itertools
+            usesing_itertools=True
+            reset_continue=ast.NamedExpr(
+                target=not_continue,
+                value=ast.Constant(value=True))
+
+            if isinstance(payload,ast.List):
+                payload.elts.insert(0,reset_continue)
+            else:
+                payload=ast.List(elts=[reset_continue,payload])
+
+        if loop_control_stack[-1][2]: # 如果包含break
+            _iter=ast.Call(
+                func=ast.Attribute(
+                    value=ast.Name(id='itertools'),
+                    attr='takewhile'),
+                args=[
+                    ast.Lambda(
+                        args=ast.arguments(
+                            posonlyargs=[],
+                            args=[
+                                ast.arg(arg='_')],
+                            kwonlyargs=[],
+                            kw_defaults=[],
+                            defaults=[]),
+                        body=not_break),
+                    _iter],
+                keywords=[])
+            
+            out_node.elts.append(
+                ast.NamedExpr(
+                    target=not_break,
+                    value=ast.Constant(value=True)))
+        
+        loop_control_stack.pop() # 弹出中断指示器
+
         out=ast.ListComp(
-            elt=elt,
+            elt=payload,
             generators=[
                 ast.comprehension(
                     target=node.target,
-                    iter=node.iter,
+                    iter=_iter,
                     ifs=[],
                     is_async=False)])
         out_node.elts.append(out)
@@ -153,6 +232,25 @@ def convert(body,recursion=0):
         out=ast.IfExp(if_statement.test,body,orelse)
         out_node.elts.append(out)
 
+    def handle_continue(continue_statement:ast.Continue):
+        loop_control_stack[-1][3]=True # have continue
+        out_node.elts.append(
+            ast.NamedExpr(
+                target=loop_control_stack[-1][1],
+                value=ast.Constant(value=False)))
+    
+    def handle_break(continue_statement:ast.Continue):
+        loop_control_stack[-1][2]=True # have break
+        loop_control_stack[-1][3]=True # break includes continue
+        out_node.elts.append(
+            ast.NamedExpr(
+                target=loop_control_stack[-1][1],
+                value=ast.Constant(value=False)))
+        out_node.elts.append(
+            ast.NamedExpr(
+                target=loop_control_stack[-1][0],
+                value=ast.Constant(value=False)))
+
     def post_process(out_node): # Output optimization
         if len(out_node.elts)==0:
             out_node=ast.Expr(value=ast.Constant(value=None))
@@ -167,6 +265,15 @@ def convert(body,recursion=0):
             handle_for(node)
         elif type(node)==ast.If:
             handle_if(node)
+            if loop_control_stack[-1][3] and body[n_body+1:]: 
+                # 如果在分支中有continue/break且分支后还有语句
+                # 则判断是否中断，再执行
+                out_node.elts.append(
+                    ast.IfExp(
+                        test=loop_control_stack[-1][1],
+                        body=convert(body[n_body+1:],recursion+1),
+                        orelse=ast.Constant(value=None)))
+                break
         elif type(node)==ast.Pass:
             pass
         elif type(node)==ast.Assign:
@@ -179,8 +286,13 @@ def convert(body,recursion=0):
         elif type(node)==ast.Import:
             handle_import(node)
         elif type(node)==ast.While:
-            usesing_itertools=True
             handle_while(node)
+        elif type(node)==ast.Continue:
+            handle_continue(node)
+            break # 中断
+        elif type(node)==ast.Break:
+            handle_break(node)
+            break
         else:
             raise ConvertError('Convert failed.\nError: "%s", line %d, Statement "%s" is not convertable.'\
                     %(filename,node.lineno,type(node).__name__))

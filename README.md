@@ -28,7 +28,7 @@ while y<h*2:
 Or use `python oneliner.py -h` for help.
 
 ## Limitation
-This script requires python3.8+. Many statements are not convertable.  
+This script requires python3.9+. Many statements are not convertable.  
 Here are the statements that have already been implemented.
 |statement|example|
 |-|-|
@@ -37,12 +37,14 @@ Here are the statements that have already been implemented.
 |AugAssign|`a*=1`|
 |If|`if a==0: ...`<br>`elif a>1: ...`<br>`else: ...`|
 |For<sub> 1</sub>|`for i in range(10): ...`|
-|While<sub> 1</sub>|`While a<100: ...`|
+|While<sub> 1</sub>|`while a<100: ...`|
+|Break|`break`|
+|Continue|`continue`|
 |Pass|`while 1: pass`|
 |Import<sub> 2</sub>|`import math`<br> `import os,sys`<br>`import numpy as np`|
 
 Remarks:
-1. 'while-else', 'for-else', 'continue' and 'break' are not implmented.
+1. 'while-else' and 'for-else' are not implmented.
 2. 'from-import' is not implmented.
 
 ## Dependencies
