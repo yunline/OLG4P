@@ -36,16 +36,15 @@ Here are the statements that have already been implemented.
 |Assign|`a=1`<br>`a,b=b,a`|
 |AugAssign|`a*=1`|
 |If|`if a==0: ...`<br>`elif a>1: ...`<br>`else: ...`|
-|For<sub> 1</sub>|`for i in range(10): ...`|
-|While<sub> 1</sub>|`while a<100: ...`|
+|For|`for i in range(10): ...`<br>`else: ...`|
+|While|`while a<100: ...`<br>`else: ...`|
 |Break|`break`|
 |Continue|`continue`|
 |Pass|`while 1: pass`|
-|Import<sub> 2</sub>|`import math`<br> `import os,sys`<br>`import numpy as np`|
+|Import<sub> 1</sub>|`import math`<br> `import os,sys`<br>`import numpy as np`|
 
 Remarks:
-1. 'while-else' and 'for-else' are not implmented.
-2. 'from-import' is not implmented.
+1. 'from-import' is not implmented.
 
 ## Dependencies
 - **CPython >= 3.9**

@@ -42,9 +42,10 @@ def convert(body: list,recursion: int=0):
 
         condition=while_statement.test
         payload=convert(while_statement.body,recursion+1)
-        orelse=convert(while_statement.orelse,recursion+1)
+
+        indicator=loop_control_stack.pop() # 弹出中断指示器
         
-        if loop_control_stack[-1][3]: # 如果包含continue
+        if indicator[3]: # 如果包含continue/break
             reset_continue=ast.NamedExpr(
                 target=not_continue,
                 value=ast.Constant(value=True))
@@ -54,7 +55,7 @@ def convert(body: list,recursion: int=0):
             else:
                 payload=ast.List(elts=[reset_continue,payload])
 
-        if loop_control_stack[-1][2]: # 如果包含break
+        if indicator[2]: # 如果包含break
             condition=ast.BoolOp(
                 op=ast.And(),
                 values=[not_break,condition])
@@ -63,8 +64,6 @@ def convert(body: list,recursion: int=0):
                 ast.NamedExpr(
                     target=not_break,
                     value=ast.Constant(value=True)))
-        
-        loop_control_stack.pop() # 弹出中断指示器
     
         out=ast.ListComp(
             elt=payload,
@@ -93,8 +92,19 @@ def convert(body: list,recursion: int=0):
                         keywords=[]),
                     ifs=[],
                     is_async=0)])
-
         out_node.elts.append(out)
+
+        if while_statement.orelse:
+            if indicator[2]: #if have break
+                orelse=convert([
+                    ast.If(
+                        test=not_break,
+                        body=while_statement.orelse,
+                        orelse=[])]
+                    ,recursion+1)
+            else:
+                orelse=convert(while_statement.orelse,recursion+1)
+            out_node.elts.append(orelse)
 
     def handle_assign(assign:ast.Assign):
         _target=assign.targets[0]
@@ -165,7 +175,9 @@ def convert(body: list,recursion: int=0):
         payload=convert(node.body,recursion+1)
         _iter=node.iter
 
-        if loop_control_stack[-1][3]: # 如果包含continue
+        indicator=loop_control_stack.pop() # 弹出中断指示器
+
+        if indicator[3]: # 如果包含continue/break
             global usesing_itertools
             usesing_itertools=True
             reset_continue=ast.NamedExpr(
@@ -177,7 +189,7 @@ def convert(body: list,recursion: int=0):
             else:
                 payload=ast.List(elts=[reset_continue,payload])
 
-        if loop_control_stack[-1][2]: # 如果包含break
+        if indicator[2]: # 如果包含break
             _iter=ast.Call(
                 func=ast.Attribute(
                     value=ast.Name(id='itertools'),
@@ -199,8 +211,6 @@ def convert(body: list,recursion: int=0):
                 ast.NamedExpr(
                     target=not_break,
                     value=ast.Constant(value=True)))
-        
-        loop_control_stack.pop() # 弹出中断指示器
 
         out=ast.ListComp(
             elt=payload,
@@ -211,6 +221,18 @@ def convert(body: list,recursion: int=0):
                     ifs=[],
                     is_async=False)])
         out_node.elts.append(out)
+
+        if node.orelse:
+            if indicator[2]: #if have break
+                orelse=convert([
+                    ast.If(
+                        test=not_break,
+                        body=node.orelse,
+                        orelse=[])]
+                    ,recursion+1)
+            else:
+                orelse=convert(node.orelse,recursion+1)
+            out_node.elts.append(orelse)
 
     def handle_import(import_statement:ast.Import):
         name_list=[alias.name for alias in node.names]
