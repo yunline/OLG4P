@@ -454,6 +454,11 @@ class Converter:
         return out_node
 
 
+def convert_code_string(code: str):
+    c = Converter()
+    return ast.unparse(c.convert(ast.parse(code).body)).replace("\n", "")
+
+
 if __name__ == "__main__":
     import sys
     import os
@@ -504,9 +509,7 @@ Options:
     with open(input_file_name, "r", encoding="utf8") as input_file:
         script = input_file.read()
 
-    main_body = ast.parse(script)
-    c = Converter()
-    result = ast.unparse(c.convert(main_body.body)).replace("\n", "")
+    result = convert_code_string(script)
 
     if output_file_name:
         with open(output_file_name, "w", encoding="utf8") as output_file:
