@@ -1,0 +1,23 @@
+name: run unitest
+
+on:
+  push:
+    branches: master
+
+  pull_request:
+    branches: master
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-unitest
+  #cancel-in-progress: true
+
+jobs:
+  format-lint-code-check:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v3.5.0
+
+      - name: Run tests
+        run: python3 ./oneliner_unitest.py
+        #pylint oneliner.py
