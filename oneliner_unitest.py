@@ -1,51 +1,47 @@
 import unittest
 import os
-import shutil
-import sys
-import subprocess
 import io
 import builtins
+import threading
+import time
+import traceback
+
+import oneliner
+
 
 class NonFunctionConvertTest(unittest.TestCase):
-    def setUp(self):
-        self.testdir = "./__testtmp__"
-        self.program = "./oneliner.py"
-        self.original_file = os.path.join(self.testdir, "original.py")
-        self.converted_file = os.path.join(self.testdir, "converted.py")
-        self.python = sys.executable
+    def exec(self, code: str, timeout=1):
+        _io = io.StringIO()
 
-        if not os.path.exists(self.testdir):
-            os.mkdir(self.testdir)
+        def _print(*args, **kwargs):
+            builtins.print(*args, file=_io, **kwargs)
 
-    def tearDown(self):
-        shutil.rmtree(self.testdir)
-    
-    def exec(self,code:str):
-        io1=io.StringIO()
-        def _print(*args,**kwargs):
-            builtins.print(*args,file=io1,**kwargs)
-        exec(code,{"print":_print})
+        err = None
 
-        return io1.getvalue()
+        def _exec():
+            nonlocal err
+            try:
+                exec(code, {"print": _print})
+            except Exception as _err:
+                err = _err
+
+        th = threading.Thread(target=_exec)
+        th.daemon = True
+        th.start()
+        t0 = time.time()
+        th.join(timeout=timeout + 0.2)
+        if time.time() - t0 > timeout:
+            raise TimeoutError("Execution timeout.")
+        if not err is None:
+            raise err
+
+        return _io.getvalue()
 
     def check_convert(self, input_script):
-        with open(self.original_file, "w", encoding="utf8") as original:
-            original.write(input_script)
-
-        subprocess.run(
-            [self.python, self.program, self.original_file, "-o", self.converted_file],
-            timeout=1,
-            check=1,
-            capture_output=1,
-        )
-
-        result1=self.exec(input_script)
-
-        result2 = subprocess.run(
-            [self.python, self.converted_file], timeout=1, check=1, capture_output=1, text=1
-        )
-
-        self.assertEqual(result1, result2.stdout)
+        result_original = self.exec(input_script)
+        converted = oneliner.convert_code_string(input_script)
+        result_converted = self.exec(converted)
+        self.assertEqual(result_original, result_converted)
 
     def test_convert_expr(self):
         script = """
@@ -115,7 +111,7 @@ while 1:
     i=i+1
 """
         self.check_convert(script)
-    
+
     def test_convert_nested_loop(self):
         pass
 
