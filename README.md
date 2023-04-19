@@ -42,6 +42,8 @@ Here are the statements that have already been implemented.
 |Continue|`continue`|
 |Pass|`while 1: pass`|
 |Import<sub> 1</sub>|`import math`<br> `import os,sys`<br>`import numpy as np`|
+|FunctionDef|`def func(a,*args): ...`|
+|Return|`return None`|
 
 Remarks:
 1. 'from-import' is not implmented.
