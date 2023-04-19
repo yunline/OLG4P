@@ -47,7 +47,7 @@ class Converter:
                     ),
                 ),
             )
- 
+
         def handle_while(while_statement: ast.While):
             global usesing_itertools
             usesing_itertools = True
