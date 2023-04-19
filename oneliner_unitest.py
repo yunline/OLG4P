@@ -1,10 +1,8 @@
 import unittest
-import os
 import io
 import builtins
 import threading
 import time
-import traceback
 
 import oneliner
 
@@ -51,16 +49,24 @@ print([i.upper() for i in "hello"])
 
     def test_convert_if(self):
         script = """
-i=%d
+i={}
+j={}
 if i==0:
-    print("xd")
+    if j==1:
+        print("xd")
+    else:
+        print("sb")
 elif i==1:
-    print("OOOO")
+    if j==1:
+        print("oooo")
+    else:
+        print("OOOO")
 else:
     print("oops")
 """
         for i in range(3):
-            self.check_convert(script % i)
+            for j in range(2):
+                self.check_convert(script.format(i, j))
 
     def test_convert_for(self):
         script = """
@@ -72,16 +78,38 @@ for i in range(10):
 
     def test_convert_for_continue_break(self):
         script = """
+for i in range(20):
+    if i%3:
+        if i>6:
+            continue
+        print("xxx")
+    print(i)
+    if i==8:
+        print("break")
+        break
+    if i%2:
+        print("aba")
+    print("foo")
+"""
+        self.check_convert(script)
+
+    def test_convert_for_else(self):
+        script = """
+brk={}
 for i in range(10):
     if i%2:
         continue
     print(i)
     if i==8:
         print("break")
-        break
+        if brk:
+            break
     print("foo")
+else:
+    print("aaaaa")
 """
-        self.check_convert(script)
+        self.check_convert(script.format("True"))
+        self.check_convert(script.format("False"))
 
     def test_convert_while(self):
         script = """
@@ -102,7 +130,8 @@ i=0
 while 1:
     if i%2:
         i=i+1
-        continue
+        if i>6:
+            continue
     print(i)
     if i>10:
         print("break")
@@ -112,8 +141,43 @@ while 1:
 """
         self.check_convert(script)
 
+    def test_convert_while_else(self):
+        script = """
+i=0
+brk={}
+while i<10:
+    if i%2:
+        print(i)
+    i=i+1
+    if i==5 and brk:
+        break
+else:
+    print("qwq")
+"""
+        self.check_convert(script.format("True"))
+        self.check_convert(script.format("False"))
+
     def test_convert_nested_loop(self):
-        pass
+        script = """
+for m in [10,20]:
+    n=0
+    while n<m:
+        n=n+1
+        for i in range(16):
+            for j in range(8):
+                if i==j:
+                    continue
+                print(i,j)
+            if i==10-n:
+                print("p1")
+                break
+        else:
+            print("p2")
+            break
+    else:
+        print("p3")
+"""
+        self.check_convert(script)
 
 
 if __name__ == "__main__":
