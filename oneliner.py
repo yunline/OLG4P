@@ -138,9 +138,10 @@ class Converter:
 
         def handle_assign(assign: ast.Assign):
             _target = assign.targets[0]
-            if type(_target) == ast.Name:
+
+            if isinstance(_target, ast.Name):
                 out_node.elts.append(ast.NamedExpr(_target, assign.value))
-            elif type(_target) == ast.Tuple:
+            elif isinstance(_target, ast.Tuple):
                 tmp_variable_name = "__ol_assign_tmp_" + unique_id()
                 out = ast.List(
                     elts=[
@@ -160,7 +161,7 @@ class Converter:
                     out.elts.append(single_assign)
                 out_node.elts.append(out)
             else:
-                raise Exception("Unknown assign type")
+                raise ConvertError("Unknown assign type at line %d" % assign.lineno)
 
         def handle_aug_assign(assign: ast.AugAssign):
             _op_dict = {
@@ -209,8 +210,8 @@ class Converter:
             # 中断指示器入栈
             self.loop_control_stack.append([not_break, not_continue, False, False])
 
-            payload = self.convert(node.body, recursion + 1)
-            _iter = node.iter
+            payload = self.convert(for_statement.body, recursion + 1)
+            _iter = for_statement.iter
 
             indicator = self.loop_control_stack.pop()  # 弹出中断指示器
 
@@ -260,27 +261,27 @@ class Converter:
                 elt=payload,
                 generators=[
                     ast.comprehension(
-                        target=node.target, iter=_iter, ifs=[], is_async=False
+                        target=for_statement.target, iter=_iter, ifs=[], is_async=False
                     )
                 ],
             )
             out_node.elts.append(out)
 
-            if node.orelse:
+            if for_statement.orelse:
                 if indicator[2]:  # if have break
                     orelse = self.convert(
-                        [ast.If(test=not_break, body=node.orelse, orelse=[])],
+                        [ast.If(test=not_break, body=for_statement.orelse, orelse=[])],
                         recursion + 1,
                     )
                 else:
-                    orelse = self.convert(node.orelse, recursion + 1)
+                    orelse = self.convert(for_statement.orelse, recursion + 1)
                 out_node.elts.append(orelse)
 
         def handle_import(import_statement: ast.Import):
-            name_list = [alias.name for alias in node.names]
+            name_list = [alias.name for alias in import_statement.names]
             asname_list = [
                 alias.asname if not alias.asname is None else alias.name
-                for alias in node.names
+                for alias in import_statement.names
             ]
 
             for n, asname in enumerate(asname_list):
@@ -354,34 +355,34 @@ class Converter:
             return out_node
 
         for n_body, node in enumerate(body):
-            if type(node) == ast.Expr:
+            if isinstance(node, ast.Expr):
                 out_node.elts.append(node)
-            elif type(node) == ast.For:
+            elif isinstance(node, ast.For):
                 handle_for(node)
-            elif type(node) == ast.If:
+            elif isinstance(node, ast.If):
                 handle_if(node)
-            elif type(node) == ast.Pass:
+            elif isinstance(node, ast.Pass):
                 pass
-            elif type(node) == ast.Assign:
+            elif isinstance(node, ast.Assign):
                 handle_assign(node)
-            elif type(node) == ast.AnnAssign:
+            elif isinstance(node, ast.AnnAssign):
                 out_node.elts.append(ast.NamedExpr(node.target, node.value))
-            elif type(node) == ast.AugAssign:
+            elif isinstance(node, ast.AugAssign):
                 handle_aug_assign(node)
-            elif type(node) == ast.Import:
+            elif isinstance(node, ast.Import):
                 handle_import(node)
-            elif type(node) == ast.While:
+            elif isinstance(node, ast.While):
                 handle_while(node)
-            elif type(node) == ast.Continue:
+            elif isinstance(node, ast.Continue):
                 handle_continue()
                 break  # 中断
-            elif type(node) == ast.Break:
+            elif isinstance(node, ast.Break):
                 handle_break()
                 break
-            elif type(node) == ast.Return:
+            elif isinstance(node, ast.Return):
                 handle_return(node)
                 break
-            elif type(node) == ast.FunctionDef:
+            elif isinstance(node, ast.FunctionDef):
                 handle_def(node)
             else:
                 raise ConvertError(
@@ -392,7 +393,7 @@ class Converter:
             if body[n_body + 1 :]:
                 # 如果在分支中有continue/break/return且之后还有语句
                 # 则判断是否中断，再执行
-                if type(node) == ast.If:
+                if isinstance(node, ast.If):
                     if self.loop_control_stack and self.loop_control_stack[-1][3]:
                         out_node.elts.append(
                             ast.IfExp(
@@ -497,7 +498,7 @@ Options:
     input_file_name = argv[0]
     filename = input_file_name
 
-    with open(input_file_name, "r") as input_file:
+    with open(input_file_name, "r", encoding="utf8") as input_file:
         script = input_file.read()
 
     main_body = ast.parse(script)
@@ -505,7 +506,7 @@ Options:
     result = ast.unparse(c.convert(main_body.body)).replace("\n", "")
 
     if output_file_name:
-        with open(output_file_name, "w") as output_file:
+        with open(output_file_name, "w", encoding="utf8") as output_file:
             print(result, file=output_file)
     else:
         print(result)
