@@ -393,15 +393,18 @@ class Converter:
             if body[n_body + 1 :]:
                 # 如果在分支中有continue/break/return且之后还有语句
                 # 则判断是否中断，再执行
-                if isinstance(node, ast.If):
-                    if self.loop_control_stack and self.loop_control_stack[-1][3]:
-                        out_node.elts.append(
-                            ast.IfExp(
-                                test=self.loop_control_stack[-1][1],
-                                body=self.convert(body[n_body + 1 :], recursion + 1),
-                                orelse=ast.Constant(value=None),
-                            )
+                if (
+                    isinstance(node, ast.If)
+                    and self.loop_control_stack
+                    and self.loop_control_stack[-1][3]
+                ):
+                    out_node.elts.append(
+                        ast.IfExp(
+                            test=self.loop_control_stack[-1][1],
+                            body=self.convert(body[n_body + 1 :], recursion + 1),
+                            orelse=ast.Constant(value=None),
                         )
+                    )
                     if not self.isfunc:
                         break
                 if self.isfunc and type(node) in [ast.For, ast.While, ast.If]:
