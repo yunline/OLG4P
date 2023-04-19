@@ -2,18 +2,14 @@ name: format check
 
 on:
   push:
-    branches: main
-    paths:
-      - '**.py'
+    branches: master
 
   pull_request:
-    branches: main
-    paths:
-      - '**.py'
+    branches: master
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-format-check
-  cancel-in-progress: true
+  #cancel-in-progress: true
 
 jobs:
   format-lint-code-check:
@@ -26,5 +22,5 @@ jobs:
         run: python3 -m pip install pylint black
 
       - name: Check code Formatting and Linting
-        run: pylint oneliner.py
-
+        run: black --check ./
+        #pylint oneliner.py
