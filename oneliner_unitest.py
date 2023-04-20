@@ -298,5 +298,73 @@ print('urllib' in globals())
         self.check_convert(script)
 
 
+class FunctionConvertTest(unittest.TestCase, OnelinerTestBase):
+    def test_convert_function(self):
+        script = """
+def func():
+    print("hello")
+for i in range(3):
+    func()
+"""
+
+        self.check_convert(script)
+
+    def test_convert_function_arg(self):
+        script = """
+def func(a,/,b,*args,c=0,**kwargs):
+    print("hello")
+    print(a)
+    print(args)
+    print(b)
+    print(kwargs)
+
+func(1,2,3,4,c=666,hello="world")
+"""
+
+        self.check_convert(script)
+
+    def test_convert_function_return(self):
+        script = """
+def func1():
+    pass
+
+def func2(c):
+    if 1:
+        if c:
+            return 123
+        print('Xd')
+    return 246
+
+def func3(c):
+    for i in range(100):
+        if i==10 and c:
+            return 123
+        elif 15<i<20:
+            continue
+        else:
+            break
+    print("xd")
+    return 246
+
+def func4(c):
+    while 1:
+        if c:
+            return 123
+        else:
+            break
+    print("xd")
+    if 1:
+        return 246
+
+print(func1())
+for func in [func2,func3,func4]:
+    print(func(False))
+    print(func(True))
+
+"""
+
+        self.check_convert(script)
+
+
 if __name__ == "__main__":
     unittest.main()
