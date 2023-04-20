@@ -8,18 +8,20 @@ import oneliner
 
 
 class NonFunctionConvertTest(unittest.TestCase):
-    def exec(self, code: str, timeout=1):
+    def exec(self, code: str, external_globals, timeout=1):
         _io = io.StringIO()
 
         def _print(*args, **kwargs):
             builtins.print(*args, file=_io, **kwargs)
 
         err = None
+        _globals = {"print": _print}
+        _globals.update(external_globals)
 
         def _exec():
             nonlocal err
             try:
-                exec(code, {"print": _print})
+                exec(code, _globals)
             except Exception as _err:
                 err = _err
 
@@ -35,10 +37,10 @@ class NonFunctionConvertTest(unittest.TestCase):
 
         return _io.getvalue()
 
-    def check_convert(self, input_script):
-        result_original = self.exec(input_script)
+    def check_convert(self, input_script, external_globals={}):
+        result_original = self.exec(input_script, external_globals)
         converted = oneliner.convert_code_string(input_script)
-        result_converted = self.exec(converted)
+        result_converted = self.exec(converted, external_globals)
         self.assertEqual(result_original, result_converted)
 
     def test_convert_expr(self):
@@ -178,6 +180,105 @@ for m in [10,20]:
         print("p3")
 """
         self.check_convert(script)
+
+    def test_convert_assign(self):
+        script = """
+a=1
+print(a)
+a=2
+print(a)
+"""
+        self.check_convert(script)
+
+    def test_convert_aug_assign(self):
+        script = """
+a=1
+a+=6
+print(a)
+a-=2
+print(a)
+a*=8
+print(a)
+a//=2
+print(a)
+a/=2
+print(a)
+a**=0.5
+print(a)
+
+a=1
+a|=0xfe
+print(a)
+a&=0x08
+print(a)
+a^=0xcc
+print(a)
+a<<=2
+print(a)
+a>>=4
+print(a)
+"""
+        self.check_convert(script)
+
+    def test_convert_subscript_assign(self):
+        script = """
+l=[1,2,3]
+l[0]=0
+print(l)
+l[::]=[1,3,5,7]
+print(l)
+
+l[0],l[2]=2,6
+print(l)
+"""
+        self.check_convert(script)
+
+    def test_convert_subscript_aug_assign(self):
+        script = """
+l=[1]
+l[0]+=1
+print(l[0])
+"""
+        self.check_convert(script)
+
+    def test_convert_attribute_assign(self):
+        script = """
+a=cls()
+a.b=0
+print(a.b)
+"""
+
+        class Dummy:
+            b = 1234
+
+        self.check_convert(script, {"cls": Dummy})
+
+    def test_convert_attribute_aug_assign(self):
+        script = """
+a=cls()
+a.b+=2
+print(a.b)
+"""
+
+        class Dummy:
+            b = 1234
+
+        self.check_convert(script, {"cls": Dummy})
+
+    def test_convert_multiple_assign(self):
+        script = """
+a=cls()
+c=[0,12]
+a.b,c[0],d,e=range(4)
+print(a.b,c,d,e)
+a.b,c[0],d,e=e,d,c[1],a.b
+print(a.b,c,d,e)
+"""
+
+        class Dummy:
+            b = 1234
+
+        self.check_convert(script, {"cls": Dummy})
 
 
 if __name__ == "__main__":
