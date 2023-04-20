@@ -12,12 +12,19 @@ concurrency:
   #cancel-in-progress: true
 
 jobs:
-  format-lint-code-check:
+  run-tests:
     runs-on: ubuntu-22.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
 
     steps:
       - uses: actions/checkout@v3.5.0
+      - uses: "actions/setup-python@v3.5.0"
+        with:
+          python-version: "${{ matrix.python-version }}"
 
       - name: Run tests
         run: python3 ./oneliner_unitest.py
-        #pylint oneliner.py
