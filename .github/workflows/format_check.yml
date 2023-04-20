@@ -1,4 +1,4 @@
-name: format check
+name: Check format
 
 on:
   push:
@@ -12,7 +12,7 @@ concurrency:
   #cancel-in-progress: true
 
 jobs:
-  format-lint-code-check:
+  format-check:
     runs-on: ubuntu-22.04
 
     steps:
