@@ -321,21 +321,29 @@ class Converter:
                 out_node.elts.append(orelse)
 
         def handle_import(import_statement: ast.Import):
-            name_list = [alias.name for alias in import_statement.names]
-            asname_list = [
-                alias.asname if not alias.asname is None else alias.name
-                for alias in import_statement.names
-            ]
+            # Example:
+            # import pygame._sdl2.video as vvv
+            #      ↓↓↓↓↓↓↓↓↓↓↓↓↓
+            # (vvv := __import__('pygame._sdl2.video')._sdl2.video)
 
-            for n, asname in enumerate(asname_list):
-                out = ast.NamedExpr(
-                    target=ast.Name(asname),
-                    value=ast.Call(
-                        func=ast.Name("__import__"),
-                        args=[ast.Constant(name_list[n])],
-                        keywords=[],
-                    ),
+            for alias in import_statement.names:
+                _import = ast.Call(
+                    func=ast.Name("__import__"),
+                    args=[ast.Constant(alias.name)],
+                    keywords=[],
                 )
+
+                module_path_list = alias.name.split(".")
+                if alias.asname is None:
+                    _name = ast.Name(module_path_list[0])
+                else:
+                    _name = ast.Name(alias.asname)
+                    if len(module_path_list) > 1:
+                        _import = ast.Attribute(
+                            value=_import, attr=".".join(module_path_list[1:])
+                        )
+
+                out = ast.NamedExpr(target=_name, value=_import)
                 out_node.elts.append(out)
 
         def handle_if(if_statement: ast.If):

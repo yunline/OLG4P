@@ -280,6 +280,21 @@ print(a.b,c,d,e)
 
         self.check_convert(script, {"cls": Dummy})
 
+    def test_convert_import(self):
+        script = """
+import sys
+print(sys.argv)
+
+import urllib.request as r
+print(r)
+print('urllib' in globals())
+import urllib.request
+print(urllib.request)
+print('urllib' in globals())
+"""
+
+        self.check_convert(script)
+
 
 if __name__ == "__main__":
     unittest.main()
