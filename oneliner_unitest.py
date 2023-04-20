@@ -365,6 +365,24 @@ for func in [func2,func3,func4]:
 
         self.check_convert(script)
 
+    def test_convert_function_decorator(self):
+        script = """
+def dec1(f):
+    print("dec1")
+    return f
+
+def dec2(f):
+    print("dec2")
+    return f
+
+@dec2
+@dec1
+def func():
+    print("func")
+
+"""
+        self.check_convert(script)
+
 
 if __name__ == "__main__":
     unittest.main()

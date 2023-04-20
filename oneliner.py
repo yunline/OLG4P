@@ -386,6 +386,8 @@ class Converter:
                     body=converter.convert(def_statement.body, 0),
                 ),
             )
+            for dec in def_statement.decorator_list[::-1]:  # handle decorators
+                out = ast.Call(func=dec, args=[out], keywords=[])
             out_node.elts.append(out)
 
         def handle_return(return_statement: ast.Return):
