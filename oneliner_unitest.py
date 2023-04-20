@@ -1,13 +1,13 @@
-import unittest
-import io
 import builtins
+import io
 import threading
 import time
+import unittest
 
 import oneliner
 
 
-class NonFunctionConvertTest(unittest.TestCase):
+class OnelinerTestBase:
     def exec(self, code: str, external_globals, timeout=5):
         _io = io.StringIO()
 
@@ -43,6 +43,8 @@ class NonFunctionConvertTest(unittest.TestCase):
         result_converted = self.exec(converted, external_globals)
         self.assertEqual(result_original, result_converted)
 
+
+class NonFunctionConvertTest(unittest.TestCase, OnelinerTestBase):
     def test_convert_expr(self):
         script = """
 print([i.upper() for i in "hello"])
