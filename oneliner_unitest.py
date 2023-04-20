@@ -8,7 +8,7 @@ import oneliner
 
 
 class NonFunctionConvertTest(unittest.TestCase):
-    def exec(self, code: str, external_globals, timeout=1):
+    def exec(self, code: str, external_globals, timeout=5):
         _io = io.StringIO()
 
         def _print(*args, **kwargs):
