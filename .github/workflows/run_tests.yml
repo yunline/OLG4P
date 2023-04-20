@@ -1,4 +1,4 @@
-name: run unitest
+name: Run unitest
 
 on:
   push:
