@@ -32,6 +32,49 @@ class Converter:
             self.return_value = ast.Name(id="__ol_return_value_" + _id)
             self.have_return = False
 
+    @staticmethod
+    def template_subscript_assign(target: ast.Subscript, value):
+        _slice = target.slice
+        if isinstance(target.slice, ast.Slice):
+            _slice = ast.Call(func=ast.Name(id="slice"), args=[], keywords=[])
+            for i in [
+                target.slice.lower,
+                target.slice.upper,
+                target.slice.step,
+            ]:
+                if i is None:
+                    _slice.args.append(ast.Constant(value=None))
+                else:
+                    _slice.args.append(i)
+
+        out = ast.Call(
+            func=ast.Attribute(value=target.value, attr="__setitem__"),
+            args=[_slice, value],
+            keywords=[],
+        )
+        return out
+
+    @staticmethod
+    def template_attribute_assign(target: ast.Attribute, value):
+        out = ast.Call(
+            func=ast.Attribute(value=target.value, attr="__setattr__"),
+            args=[ast.Constant(value=target.attr), value],
+            keywords=[],
+        )
+        return out
+
+    def template_auto_assign(self, target, value):
+        if isinstance(target, ast.Name):
+            out = ast.NamedExpr(target=target, value=value)
+        elif isinstance(target, ast.Subscript):
+            out = self.template_subscript_assign(target, value)
+        elif isinstance(target, ast.Attribute):
+            out = self.template_attribute_assign(target, value)
+        else:
+            raise ConvertError("Unknown assign type")
+
+        return out
+
     def convert(self, body: list, recursion: int = 0):
         out_node = ast.List([])
 
@@ -139,9 +182,7 @@ class Converter:
         def handle_assign(assign: ast.Assign):
             _target = assign.targets[0]
 
-            if isinstance(_target, ast.Name):
-                out_node.elts.append(ast.NamedExpr(_target, assign.value))
-            elif isinstance(_target, ast.Tuple):
+            if isinstance(_target, ast.Tuple):
                 tmp_variable_name = "__ol_assign_tmp_" + unique_id()
                 out = ast.List(
                     elts=[
@@ -150,18 +191,21 @@ class Converter:
                         )
                     ],
                 )
-                for n, target in enumerate(_target.elts):
-                    single_assign = ast.NamedExpr(
-                        target=target,
-                        value=ast.Subscript(
-                            value=ast.Name(id=tmp_variable_name),
-                            slice=ast.Constant(value=n),
-                        ),
+                for n, single_target in enumerate(_target.elts):
+                    value = ast.Subscript(
+                        value=ast.Name(id=tmp_variable_name),
+                        slice=ast.Constant(value=n),
                     )
+                    single_assign = self.template_auto_assign(single_target, value)
                     out.elts.append(single_assign)
                 out_node.elts.append(out)
+
             else:
-                raise ConvertError("Unknown assign type at line %d" % assign.lineno)
+                try:
+                    out = self.template_auto_assign(_target, assign.value)
+                    out_node.elts.append(out)
+                except ConvertError:
+                    raise ConvertError("Unknown assign type at line %d" % assign.lineno)
 
         def handle_aug_assign(assign: ast.AugAssign):
             _op_dict = {
@@ -180,6 +224,10 @@ class Converter:
                 ast.BitXor: "__ixor__",
             }
             i_op_name = _op_dict[type(assign.op)]
+
+            orelse_op = ast.BinOp(left=assign.target, op=assign.op, right=assign.value)
+            orelse = self.template_auto_assign(assign.target, orelse_op)
+
             out = ast.Expr(
                 value=ast.IfExp(
                     test=ast.Call(
@@ -192,12 +240,7 @@ class Converter:
                         args=[assign.value],
                         keywords=[],
                     ),
-                    orelse=ast.NamedExpr(
-                        target=assign.target,
-                        value=ast.BinOp(
-                            left=assign.target, op=assign.op, right=assign.value
-                        ),
-                    ),
+                    orelse=orelse,
                 )
             )
             out_node.elts.append(out)
