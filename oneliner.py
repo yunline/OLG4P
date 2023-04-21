@@ -124,7 +124,7 @@ class Converter:
             for _arg in args:
                 _arg.annotation = None
 
-    def handle_for(self, for_statement: ast.For, recursion) -> list:
+    def handle_for(self, for_statement: ast.For) -> list:
         out = []
         global usesing_itertools
 
@@ -134,7 +134,7 @@ class Converter:
         # 中断指示器入栈
         self.loop_control_stack.append([not_break, not_continue, False, False])
 
-        payload = self.convert(for_statement.body, recursion + 1)
+        payload = self.convert(for_statement.body)
         _iter = for_statement.iter
 
         indicator = self.loop_control_stack.pop()  # 弹出中断指示器
@@ -191,16 +191,15 @@ class Converter:
         if for_statement.orelse:
             if indicator[2]:  # if have break
                 orelse = self.convert(
-                    [ast.If(test=not_break, body=for_statement.orelse, orelse=[])],
-                    recursion + 1,
+                    [ast.If(test=not_break, body=for_statement.orelse, orelse=[])]
                 )
             else:
-                orelse = self.convert(for_statement.orelse, recursion + 1)
+                orelse = self.convert(for_statement.orelse)
             out.append(orelse)
 
         return out
 
-    def handle_while(self, while_statement: ast.While, recursion) -> list:
+    def handle_while(self, while_statement: ast.While) -> list:
         out = []
         global usesing_itertools
         usesing_itertools = True
@@ -212,7 +211,7 @@ class Converter:
         self.loop_control_stack.append([not_break, not_continue, False, False])
 
         condition = while_statement.test
-        payload = self.convert(while_statement.body, recursion + 1)
+        payload = self.convert(while_statement.body)
 
         indicator = self.loop_control_stack.pop()  # 弹出中断指示器
 
@@ -239,15 +238,14 @@ class Converter:
         if while_statement.orelse:
             if indicator[2]:  # if have break
                 orelse = self.convert(
-                    [ast.If(test=not_break, body=while_statement.orelse, orelse=[])],
-                    recursion + 1,
+                    [ast.If(test=not_break, body=while_statement.orelse, orelse=[])]
                 )
             else:
-                orelse = self.convert(while_statement.orelse, recursion + 1)
+                orelse = self.convert(while_statement.orelse)
             out.append(orelse)
         return out
 
-    def convert(self, body: list, recursion: int = 0):
+    def convert(self, body: list, top_level=False):
         out_node = ast.List([])
 
         def inject_itertools():
@@ -356,8 +354,8 @@ class Converter:
                 out_node.elts.append(out)
 
         def handle_if(if_statement: ast.If):
-            body = self.convert(if_statement.body, recursion + 1)
-            orelse = self.convert(if_statement.orelse, recursion + 1)
+            body = self.convert(if_statement.body)
+            orelse = self.convert(if_statement.orelse)
             out = ast.IfExp(if_statement.test, body, orelse)
             out_node.elts.append(out)
 
@@ -392,7 +390,7 @@ class Converter:
             converter = Converter(isfunc=True)
             function_body = ast.Lambda(
                 args=def_statement.args,
-                body=converter.convert(def_statement.body, 0),
+                body=converter.convert(def_statement.body, top_level=True),
             )
             for dec in def_statement.decorator_list[::-1]:  # handle decorators
                 function_body = ast.Call(func=dec, args=[function_body], keywords=[])
@@ -422,7 +420,7 @@ class Converter:
             if isinstance(node, ast.Expr):
                 out_node.elts.append(node)
             elif isinstance(node, ast.For):
-                out_node.elts.extend(self.handle_for(node, recursion))
+                out_node.elts.extend(self.handle_for(node))
             elif isinstance(node, ast.If):
                 handle_if(node)
             elif isinstance(node, ast.Pass):
@@ -436,7 +434,7 @@ class Converter:
             elif isinstance(node, ast.Import):
                 handle_import(node)
             elif isinstance(node, ast.While):
-                out_node.elts.extend(self.handle_while(node, recursion))
+                out_node.elts.extend(self.handle_while(node))
             elif isinstance(node, ast.Continue):
                 handle_continue()
                 break  # 中断
@@ -466,7 +464,7 @@ class Converter:
                     out_node.elts.append(
                         ast.IfExp(
                             test=self.loop_control_stack[-1][1],
-                            body=self.convert(body[n_body + 1 :], recursion + 1),
+                            body=self.convert(body[n_body + 1 :]),
                             orelse=ast.Constant(value=None),
                         )
                     )
@@ -477,13 +475,13 @@ class Converter:
                         out_node.elts.append(
                             ast.IfExp(
                                 test=self.not_return,
-                                body=self.convert(body[n_body + 1 :], recursion + 1),
+                                body=self.convert(body[n_body + 1 :]),
                                 orelse=ast.Constant(value=None),
                             )
                         )
                     break
 
-        if recursion == 0:
+        if top_level:
             if self.isfunc:
                 if self.have_return:
                     # inject not_return and return_value
@@ -521,7 +519,9 @@ class Converter:
 
 def convert_code_string(code: str):
     c = Converter()
-    return ast.unparse(c.convert(ast.parse(code).body)).replace("\n", "")
+    return ast.unparse(c.convert(ast.parse(code).body, top_level=True)).replace(
+        "\n", ""
+    )
 
 
 if __name__ == "__main__":
