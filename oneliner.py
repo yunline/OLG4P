@@ -420,8 +420,8 @@ class Converter:
     def handle_expr(self, expr: ast.Expr) -> list:
         return [expr]
 
-    def convert(self, body: list, top_level=False):
-        out_node = ast.List([])
+    def convert(self, body: list[ast.AST], top_level=False) -> ast.AST:
+        out = []
 
         for n_body, node in enumerate(body):
             if type(node) not in self.node_handler_map:
@@ -431,20 +431,21 @@ class Converter:
                     % (filename, node.lineno, type(node).__name__)
                 )
 
-            out_node.elts.extend(self.node_handler_map[type(node)](node))
+            out.extend(self.node_handler_map[type(node)](node))
 
             if type(node) in [ast.Continue, ast.Break, ast.Return]:
                 break
 
             if body[n_body + 1 :]:
-                # 如果在分支中有continue/break/return且之后还有语句
+                # 如果在分支之后还有语句
+                # 且在分支中有continue/break/return
                 # 则判断是否中断，再执行
                 if (
                     isinstance(node, ast.If)
                     and self.loop_control_stack
                     and self.loop_control_stack[-1][3]
                 ):
-                    out_node.elts.append(
+                    out.append(
                         ast.IfExp(
                             test=self.loop_control_stack[-1][1],
                             body=self.convert(body[n_body + 1 :]),
@@ -455,7 +456,7 @@ class Converter:
                         break
                 if self.isfunc and type(node) in [ast.For, ast.While, ast.If]:
                     if self.have_return:
-                        out_node.elts.append(
+                        out.append(
                             ast.IfExp(
                                 test=self.not_return,
                                 body=self.convert(body[n_body + 1 :]),
@@ -474,26 +475,24 @@ class Converter:
                     _return_value_assign = ast.NamedExpr(
                         target=self.return_value, value=ast.Constant(value=None)
                     )
-                    out_node.elts.insert(0, _not_return_assign)
-                    out_node.elts.insert(0, _return_value_assign)
+                    out.insert(0, _not_return_assign)
+                    out.insert(0, _return_value_assign)
 
                     # set the return value to return_value
-                    out_node.elts.append(self.return_value)
+                    out.append(self.return_value)
                 else:
                     # set the return value to None
-                    out_node.elts.append(ast.Constant(value=None))
+                    out.append(ast.Constant(value=None))
 
-                out_node = ast.List(
-                    elts=[
-                        ast.Subscript(
-                            value=out_node,
-                            slice=ast.Constant(value=-1),
-                        )
-                    ]
-                )
+                out = [
+                    ast.Subscript(
+                        value=ast.List(elts=out),
+                        slice=ast.Constant(value=-1),
+                    )
+                ]
 
             elif usesing_itertools:
-                out_node.elts.insert(
+                out.insert(
                     0,
                     ast.NamedExpr(
                         target=ast.Name(id="itertools"),
@@ -506,10 +505,12 @@ class Converter:
                 )
 
         # Optimize output
-        if len(out_node.elts) == 0:
+        if len(out) == 0:
             out_node = ast.Constant(value=None)
-        elif len(out_node.elts) == 1:
-            out_node = out_node.elts[0]
+        elif len(out) == 1:
+            out_node = out[0]
+        else:
+            out_node = ast.List(elts=out)
 
         return out_node
 
