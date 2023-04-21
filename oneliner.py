@@ -1,10 +1,8 @@
 import ast
 import random
+from typing import Optional
 
 random.seed(12345)
-
-usesing_itertools = False
-filename = "<string>"
 
 
 class ConvertError(Exception):
@@ -24,8 +22,13 @@ def unique_id():
 class Converter:
     def __init__(self, isfunc: bool = False):
         self.isfunc = isfunc
+
         self.loop_control_stack = []
         # [[break_obj, continue_obj, have_break, have_continue], ...]
+
+        self.usesing_itertools = False
+        self.filename = "<string>"
+
         if isfunc:
             _id = unique_id()
             self.not_return = ast.Name(id="__ol_not_return_" + _id)
@@ -47,6 +50,9 @@ class Converter:
             ast.Break: self.handle_break,
             ast.Return: self.handle_return,
         }
+
+    def set_filename(self, name: str):
+        self.filename = name
 
     @staticmethod
     def template_subscript_assign(target: ast.Subscript, value: ast.AST) -> ast.AST:
@@ -142,7 +148,6 @@ class Converter:
 
     def handle_for(self, for_statement: ast.For) -> list:
         out = []
-        global usesing_itertools
 
         _id = unique_id()
         not_break = ast.Name(id="__ol_not_brk_" + _id)
@@ -167,7 +172,7 @@ class Converter:
 
         if indicator[2] or (self.isfunc and self.have_return):
             # 如果包含break/return
-            usesing_itertools = True
+            self.usesing_itertools = True
             not_interrupt = ast.BoolOp(op=ast.And(), values=[])
             if indicator[2]:
                 not_interrupt.values.append(not_break)
@@ -217,8 +222,7 @@ class Converter:
 
     def handle_while(self, while_statement: ast.While) -> list:
         out = []
-        global usesing_itertools
-        usesing_itertools = True
+        self.usesing_itertools = True
 
         _id = unique_id()
         not_break = ast.Name(id="__ol_not_brk_" + _id)
@@ -365,10 +369,13 @@ class Converter:
         self.arg_remove_annotation(def_statement.args)
 
         converter = Converter(isfunc=True)
+        converter.set_filename(self.filename)
         function_body = ast.Lambda(
             args=def_statement.args,
             body=converter.convert(def_statement.body, top_level=True),
         )
+        if converter.usesing_itertools:
+            self.usesing_itertools = True
         for dec in def_statement.decorator_list[::-1]:  # handle decorators
             function_body = ast.Call(
                 func=dec,
@@ -428,7 +435,7 @@ class Converter:
                 raise ConvertError(
                     'Convert failed.\nError: "%s", '
                     'line %d, Statement "%s" is not convertable.'
-                    % (filename, node.lineno, type(node).__name__)
+                    % (self.filename, node.lineno, type(node).__name__)
                 )
 
             out.extend(self.node_handler_map[type(node)](node))
@@ -491,7 +498,7 @@ class Converter:
                     )
                 ]
 
-            elif usesing_itertools:
+            elif self.usesing_itertools:
                 out.insert(
                     0,
                     ast.NamedExpr(
@@ -515,8 +522,10 @@ class Converter:
         return out_node
 
 
-def convert_code_string(code: str) -> str:
+def convert_code_string(code: str, filename: Optional[str] = None) -> str:
     c = Converter()
+    if filename is not None:
+        c.set_filename(filename)
     return ast.unparse(c.convert(ast.parse(code).body, top_level=True)).replace(
         "\n", ""
     )
@@ -567,12 +576,11 @@ Options:
         print("Error: Invalid input script path %s." % argv[0])
         sys.exit(1)
     input_file_name = argv[0]
-    filename = input_file_name
 
     with open(input_file_name, "r", encoding="utf8") as input_file:
         script = input_file.read()
 
-    result = convert_code_string(script)
+    result = convert_code_string(script, filename=input_file_name)
 
     if output_file_name:
         with open(output_file_name, "w", encoding="utf8") as output_file:
