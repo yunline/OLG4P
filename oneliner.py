@@ -279,7 +279,7 @@ class Converter:
                 else:
                     payload = ast.List(elts=[reset_continue, payload])
 
-            if indicator[2] or (self.isfunc and self.have_return):  
+            if indicator[2] or (self.isfunc and self.have_return):
                 # 如果包含break/return
                 usesing_itertools = True
                 not_interrupt = ast.BoolOp(op=ast.And(), values=[])
