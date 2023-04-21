@@ -379,12 +379,14 @@ class Converter:
 
         def handle_def(def_statement: ast.FunctionDef):
             converter = Converter(isfunc=True)
+            function_body = ast.Lambda(
+                args=def_statement.args,
+                body=converter.convert(def_statement.body, 0),
+            )
+            for dec in def_statement.decorator_list[::-1]:  # handle decorators
+                function_body = ast.Call(func=dec, args=[function_body], keywords=[])
             out = ast.NamedExpr(
-                target=ast.Name(id=def_statement.name),
-                value=ast.Lambda(
-                    args=def_statement.args,
-                    body=converter.convert(def_statement.body, 0),
-                ),
+                target=ast.Name(id=def_statement.name), value=function_body
             )
             out_node.elts.append(out)
 
@@ -472,27 +474,27 @@ class Converter:
         if recursion == 0:
             if self.isfunc:
                 if self.have_return:
-                    out_node.elts.insert(
-                        0,
-                        ast.NamedExpr(
-                            target=self.not_return, value=ast.Constant(value=True)
-                        ),
+                    # inject not_return and return_value
+                    _not_return_assign = ast.NamedExpr(
+                        target=self.not_return, value=ast.Constant(value=True)
                     )
-
-                out_node.elts.insert(
-                    0,
-                    ast.NamedExpr(
+                    _return_value_assign = ast.NamedExpr(
                         target=self.return_value, value=ast.Constant(value=None)
-                    ),
-                )
+                    )
+                    out_node.elts.insert(0, _not_return_assign)
+                    out_node.elts.insert(0, _return_value_assign)
+
+                    # set the return value to return_value
+                    out_node.elts.append(self.return_value)
+                else:
+                    # set the return value to None
+                    out_node.elts.append(ast.Constant(value=None))
 
                 out_node = ast.List(
                     elts=[
-                        ast.Expr(
-                            value=ast.Subscript(
-                                value=ast.List(elts=[out_node, self.return_value]),
-                                slice=ast.Constant(value=-1),
-                            )
+                        ast.Subscript(
+                            value=out_node,
+                            slice=ast.Constant(value=-1),
                         )
                     ]
                 )
