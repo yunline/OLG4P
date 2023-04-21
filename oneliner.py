@@ -75,6 +75,17 @@ class Converter:
 
         return out
 
+    @staticmethod
+    def arg_remove_annotation(arg: ast.arguments):
+        # Warning: In place operation
+        if not arg.vararg is None:
+            arg.vararg.annotation = None
+        if not arg.kwarg is None:
+            arg.kwarg.annotation = None
+        for args in [arg.posonlyargs, arg.args, arg.kwonlyargs]:
+            for _arg in args:
+                _arg.annotation = None
+
     def convert(self, body: list, recursion: int = 0):
         out_node = ast.List([])
 
@@ -378,6 +389,8 @@ class Converter:
             )
 
         def handle_def(def_statement: ast.FunctionDef):
+            self.arg_remove_annotation(def_statement.args)
+
             converter = Converter(isfunc=True)
             function_body = ast.Lambda(
                 args=def_statement.args,
