@@ -33,7 +33,7 @@ class Converter:
             self.have_return = False
 
     @staticmethod
-    def template_subscript_assign(target: ast.Subscript, value):
+    def template_subscript_assign(target: ast.Subscript, value) -> ast.AST:
         _slice = target.slice
         if isinstance(target.slice, ast.Slice):
             _slice = ast.Call(func=ast.Name(id="slice"), args=[], keywords=[])
@@ -55,7 +55,7 @@ class Converter:
         return out
 
     @staticmethod
-    def template_attribute_assign(target: ast.Attribute, value):
+    def template_attribute_assign(target: ast.Attribute, value) -> ast.AST:
         out = ast.Call(
             func=ast.Attribute(value=target.value, attr="__setattr__"),
             args=[ast.Constant(value=target.attr), value],
@@ -63,7 +63,7 @@ class Converter:
         )
         return out
 
-    def template_auto_assign(self, target, value):
+    def template_auto_assign(self, target, value) -> ast.AST:
         if isinstance(target, ast.Name):
             out = ast.NamedExpr(target=target, value=value)
         elif isinstance(target, ast.Subscript):
@@ -76,7 +76,7 @@ class Converter:
         return out
 
     @staticmethod
-    def template_while(payload, condition):
+    def template_while(payload, condition) -> ast.AST:
         takewhile_args = [
             ast.Lambda(
                 args=ast.arguments(
@@ -114,7 +114,7 @@ class Converter:
         return out
 
     @staticmethod
-    def arg_remove_annotation(arg: ast.arguments):
+    def arg_remove_annotation(arg: ast.arguments) -> None:
         # Warning: In place operation
         if arg.vararg is not None:
             arg.vararg.annotation = None
@@ -245,6 +245,165 @@ class Converter:
             out.append(orelse)
         return out
 
+    def handle_assign(self, assign: ast.Assign) -> list:
+        out = []
+        _target = assign.targets[0]
+
+        if isinstance(_target, ast.Tuple):
+            tmp_variable_name = "__ol_assign_tmp_" + unique_id()
+
+            out.append(
+                ast.NamedExpr(target=ast.Name(id=tmp_variable_name), value=assign.value)
+            )
+
+            for n, single_target in enumerate(_target.elts):
+                value = ast.Subscript(
+                    value=ast.Name(id=tmp_variable_name),
+                    slice=ast.Constant(value=n),
+                )
+                single_assign = self.template_auto_assign(single_target, value)
+                out.append(single_assign)
+
+        else:
+            try:
+                out.append(self.template_auto_assign(_target, assign.value))
+            except ConvertError:
+                raise ConvertError("Unknown assign type at line %d" % assign.lineno)
+        return out
+
+    def handle_aug_assign(self, assign: ast.AugAssign) -> list:
+        _op_dict = {
+            ast.Add: "__iadd__",
+            ast.BitAnd: "__iand__",
+            ast.FloorDiv: "__ifloordiv__",
+            ast.LShift: "__ilshift__",
+            ast.Mod: "__imod__",
+            ast.Mult: "__imul__",
+            ast.MatMult: "__imatmul__",
+            ast.BitOr: "__ior__",
+            ast.Pow: "__ipow__",
+            ast.RShift: "__irshift__",
+            ast.Sub: "__isub__",
+            ast.Div: "__itruediv__",
+            ast.BitXor: "__ixor__",
+        }
+        i_op_name = _op_dict[type(assign.op)]
+
+        orelse_op = ast.BinOp(left=assign.target, op=assign.op, right=assign.value)
+        orelse = self.template_auto_assign(assign.target, orelse_op)
+
+        out = ast.Expr(
+            value=ast.IfExp(
+                test=ast.Call(
+                    func=ast.Name(id="hasattr"),
+                    args=[assign.target, ast.Constant(value=i_op_name)],
+                    keywords=[],
+                ),
+                body=ast.Call(
+                    func=ast.Attribute(value=assign.target, attr=i_op_name),
+                    args=[assign.value],
+                    keywords=[],
+                ),
+                orelse=orelse,
+            )
+        )
+        return [out]
+
+    def handle_ann_assign(self, assign: ast.AnnAssign) -> list:
+        out = []
+        if assign.value is not None:
+            out.append(ast.NamedExpr(assign.target, assign.value))
+        return out
+
+    def handle_if(self, if_statement: ast.If) -> list:
+        body = self.convert(if_statement.body)
+        orelse = self.convert(if_statement.orelse)
+        return [ast.IfExp(if_statement.test, body, orelse)]
+
+    def handle_import(self, import_statement: ast.Import) -> list:
+        # Example:
+        # import pygame._sdl2.video as vvv
+        #      ↓↓↓↓↓↓↓↓↓↓↓↓↓
+        # (vvv := __import__('pygame._sdl2.video')._sdl2.video)
+
+        for alias in import_statement.names:
+            _import = ast.Call(
+                func=ast.Name("__import__"),
+                args=[ast.Constant(alias.name)],
+                keywords=[],
+            )
+
+            module_path_list = alias.name.split(".")
+            if alias.asname is None:
+                _name = ast.Name(module_path_list[0])
+            else:
+                _name = ast.Name(alias.asname)
+                if len(module_path_list) > 1:
+                    _import = ast.Attribute(
+                        value=_import, attr=".".join(module_path_list[1:])
+                    )
+
+            return [ast.NamedExpr(target=_name, value=_import)]
+
+    def handle_def(self, def_statement: ast.FunctionDef) -> list:
+        self.arg_remove_annotation(def_statement.args)
+
+        converter = Converter(isfunc=True)
+        function_body = ast.Lambda(
+            args=def_statement.args,
+            body=converter.convert(def_statement.body, top_level=True),
+        )
+        for dec in def_statement.decorator_list[::-1]:  # handle decorators
+            function_body = ast.Call(
+                func=dec,
+                args=[function_body],
+                keywords=[],
+            )
+        return [
+            ast.NamedExpr(
+                target=ast.Name(id=def_statement.name),
+                value=function_body,
+            )
+        ]
+
+    def handle_break(self, break_statement: ast.Break) -> list:
+        self.loop_control_stack[-1][2] = True  # have break
+        self.loop_control_stack[-1][3] = True  # break includes continue
+
+        return [
+            ast.NamedExpr(
+                target=self.loop_control_stack[-1][1],
+                value=ast.Constant(value=False),
+            ),
+            ast.NamedExpr(
+                target=self.loop_control_stack[-1][0],
+                value=ast.Constant(value=False),
+            ),
+        ]
+
+    def handle_continue(self, continue_statement: ast.Continue) -> list:
+        self.loop_control_stack[-1][3] = True  # have continue
+
+        return [
+            ast.NamedExpr(
+                target=self.loop_control_stack[-1][1],
+                value=ast.Constant(value=False),
+            )
+        ]
+
+    def handle_return(self, return_statement: ast.Return) -> list:
+        self.have_return = True
+        return [
+            ast.NamedExpr(target=self.not_return, value=ast.Constant(value=False)),
+            ast.NamedExpr(target=self.return_value, value=return_statement.value),
+        ]
+
+    def handle_pass(self, pass_statement: ast.Pass) -> list:
+        return []
+
+    def handle_expr(self, expr: ast.Expr) -> list:
+        return [expr]
+
     def convert(self, body: list, top_level=False):
         out_node = ast.List([])
 
@@ -261,154 +420,6 @@ class Converter:
                 ),
             )
 
-        def handle_assign(assign: ast.Assign):
-            _target = assign.targets[0]
-
-            if isinstance(_target, ast.Tuple):
-                tmp_variable_name = "__ol_assign_tmp_" + unique_id()
-                out = ast.List(
-                    elts=[
-                        ast.NamedExpr(
-                            target=ast.Name(id=tmp_variable_name), value=assign.value
-                        )
-                    ],
-                )
-                for n, single_target in enumerate(_target.elts):
-                    value = ast.Subscript(
-                        value=ast.Name(id=tmp_variable_name),
-                        slice=ast.Constant(value=n),
-                    )
-                    single_assign = self.template_auto_assign(single_target, value)
-                    out.elts.append(single_assign)
-                out_node.elts.append(out)
-
-            else:
-                try:
-                    out = self.template_auto_assign(_target, assign.value)
-                    out_node.elts.append(out)
-                except ConvertError:
-                    raise ConvertError("Unknown assign type at line %d" % assign.lineno)
-
-        def handle_aug_assign(assign: ast.AugAssign):
-            _op_dict = {
-                ast.Add: "__iadd__",
-                ast.BitAnd: "__iand__",
-                ast.FloorDiv: "__ifloordiv__",
-                ast.LShift: "__ilshift__",
-                ast.Mod: "__imod__",
-                ast.Mult: "__imul__",
-                ast.MatMult: "__imatmul__",
-                ast.BitOr: "__ior__",
-                ast.Pow: "__ipow__",
-                ast.RShift: "__irshift__",
-                ast.Sub: "__isub__",
-                ast.Div: "__itruediv__",
-                ast.BitXor: "__ixor__",
-            }
-            i_op_name = _op_dict[type(assign.op)]
-
-            orelse_op = ast.BinOp(left=assign.target, op=assign.op, right=assign.value)
-            orelse = self.template_auto_assign(assign.target, orelse_op)
-
-            out = ast.Expr(
-                value=ast.IfExp(
-                    test=ast.Call(
-                        func=ast.Name(id="hasattr"),
-                        args=[assign.target, ast.Constant(value=i_op_name)],
-                        keywords=[],
-                    ),
-                    body=ast.Call(
-                        func=ast.Attribute(value=assign.target, attr=i_op_name),
-                        args=[assign.value],
-                        keywords=[],
-                    ),
-                    orelse=orelse,
-                )
-            )
-            out_node.elts.append(out)
-
-        def handle_import(import_statement: ast.Import):
-            # Example:
-            # import pygame._sdl2.video as vvv
-            #      ↓↓↓↓↓↓↓↓↓↓↓↓↓
-            # (vvv := __import__('pygame._sdl2.video')._sdl2.video)
-
-            for alias in import_statement.names:
-                _import = ast.Call(
-                    func=ast.Name("__import__"),
-                    args=[ast.Constant(alias.name)],
-                    keywords=[],
-                )
-
-                module_path_list = alias.name.split(".")
-                if alias.asname is None:
-                    _name = ast.Name(module_path_list[0])
-                else:
-                    _name = ast.Name(alias.asname)
-                    if len(module_path_list) > 1:
-                        _import = ast.Attribute(
-                            value=_import, attr=".".join(module_path_list[1:])
-                        )
-
-                out = ast.NamedExpr(target=_name, value=_import)
-                out_node.elts.append(out)
-
-        def handle_if(if_statement: ast.If):
-            body = self.convert(if_statement.body)
-            orelse = self.convert(if_statement.orelse)
-            out = ast.IfExp(if_statement.test, body, orelse)
-            out_node.elts.append(out)
-
-        def handle_continue():
-            self.loop_control_stack[-1][3] = True  # have continue
-            out_node.elts.append(
-                ast.NamedExpr(
-                    target=self.loop_control_stack[-1][1],
-                    value=ast.Constant(value=False),
-                )
-            )
-
-        def handle_break():
-            self.loop_control_stack[-1][2] = True  # have break
-            self.loop_control_stack[-1][3] = True  # break includes continue
-            out_node.elts.append(
-                ast.NamedExpr(
-                    target=self.loop_control_stack[-1][1],
-                    value=ast.Constant(value=False),
-                )
-            )
-            out_node.elts.append(
-                ast.NamedExpr(
-                    target=self.loop_control_stack[-1][0],
-                    value=ast.Constant(value=False),
-                )
-            )
-
-        def handle_def(def_statement: ast.FunctionDef):
-            self.arg_remove_annotation(def_statement.args)
-
-            converter = Converter(isfunc=True)
-            function_body = ast.Lambda(
-                args=def_statement.args,
-                body=converter.convert(def_statement.body, top_level=True),
-            )
-            for dec in def_statement.decorator_list[::-1]:  # handle decorators
-                function_body = ast.Call(func=dec, args=[function_body], keywords=[])
-            out = ast.NamedExpr(
-                target=ast.Name(id=def_statement.name), value=function_body
-            )
-            out_node.elts.append(out)
-
-        def handle_return(return_statement: ast.Return):
-            self.have_return = True
-            out_node.elts.append(
-                ast.NamedExpr(target=self.not_return, value=ast.Constant(value=False))
-            )
-
-            out_node.elts.append(
-                ast.NamedExpr(target=self.return_value, value=return_statement.value)
-            )
-
         def post_process(out_node):  # Output optimization
             if len(out_node.elts) == 0:
                 out_node = ast.Expr(value=ast.Constant(value=None))
@@ -418,40 +429,40 @@ class Converter:
 
         for n_body, node in enumerate(body):
             if isinstance(node, ast.Expr):
-                out_node.elts.append(node)
+                out_node.elts.extend(self.handle_expr(node))
             elif isinstance(node, ast.For):
                 out_node.elts.extend(self.handle_for(node))
             elif isinstance(node, ast.If):
-                handle_if(node)
+                out_node.elts.extend(self.handle_if(node))
             elif isinstance(node, ast.Pass):
-                pass
+                out_node.elts.extend(self.handle_pass(node))
             elif isinstance(node, ast.Assign):
-                handle_assign(node)
+                out_node.elts.extend(self.handle_assign(node))
             elif isinstance(node, ast.AnnAssign):
-                out_node.elts.append(ast.NamedExpr(node.target, node.value))
+                out_node.elts.extend(self.handle_ann_assign(node))
             elif isinstance(node, ast.AugAssign):
-                handle_aug_assign(node)
+                out_node.elts.extend(self.handle_aug_assign(node))
             elif isinstance(node, ast.Import):
-                handle_import(node)
+                out_node.elts.extend(self.handle_import(node))
             elif isinstance(node, ast.While):
                 out_node.elts.extend(self.handle_while(node))
-            elif isinstance(node, ast.Continue):
-                handle_continue()
-                break  # 中断
-            elif isinstance(node, ast.Break):
-                handle_break()
-                break
-            elif isinstance(node, ast.Return):
-                handle_return(node)
-                break
             elif isinstance(node, ast.FunctionDef):
-                handle_def(node)
+                out_node.elts.extend(self.handle_def(node))
+            elif isinstance(node, ast.Continue):
+                out_node.elts.extend(self.handle_continue(node))
+            elif isinstance(node, ast.Break):
+                out_node.elts.extend(self.handle_break(node))
+            elif isinstance(node, ast.Return):
+                out_node.elts.extend(self.handle_return(node))
             else:
                 raise ConvertError(
                     'Convert failed.\nError: "%s", '
                     'line %d, Statement "%s" is not convertable.'
                     % (filename, node.lineno, type(node).__name__)
                 )
+
+            if type(node) in [ast.Continue, ast.Break, ast.Return]:
+                break
 
             if body[n_body + 1 :]:
                 # 如果在分支中有continue/break/return且之后还有语句
