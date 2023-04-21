@@ -392,6 +392,14 @@ func()
 """
         self.check_convert(script)
 
+    def test_convert_function_with_type_hint(self):
+        script = """
+def func(a:int,/,b:int,*args:int,c:int=123,**kw:int) -> None:
+    print(a,b,args,c,kw)
+func(1,2,3,4,5,c=6,d=7,e=8)
+"""
+        self.check_convert(script)
+
 
 if __name__ == "__main__":
     unittest.main()
