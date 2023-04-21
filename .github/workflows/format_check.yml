@@ -1,4 +1,4 @@
-name: Check format
+name: Check format and lint
 
 on:
   push:
@@ -19,8 +19,10 @@ jobs:
       - uses: actions/checkout@v3.5.0
 
       - name: Install deps
-        run: python3 -m pip install pylint black
+        run: python3 -m pip install ruff black
 
-      - name: Check code Formatting and Linting
+      - name: Check code Formatting
         run: black --check ./
-        #pylint oneliner.py
+      
+      - name: Check code Linting
+        run: ruff ./

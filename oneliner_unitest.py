@@ -32,7 +32,7 @@ class OnelinerTestBase:
         th.join(timeout=timeout + 0.2)
         if time.time() - t0 > timeout:
             raise TimeoutError("Execution timeout.")
-        if not err is None:
+        if err is not None:
             raise err
 
         return _io.getvalue()
