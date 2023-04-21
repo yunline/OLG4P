@@ -24,7 +24,6 @@ class Converter:
         self.isfunc = isfunc
 
         self.loop_control_stack = []
-        # [[break_obj, continue_obj, have_break, have_continue], ...]
 
         self.usesing_itertools = False
         self.filename = "<string>"
@@ -152,15 +151,22 @@ class Converter:
         _id = unique_id()
         not_break = ast.Name(id="__ol_not_brk_" + _id)
         not_continue = ast.Name(id="__ol_not_cont_" + _id)
-        # 中断指示器入栈
-        self.loop_control_stack.append([not_break, not_continue, False, False])
+
+        self.loop_control_stack.append(
+            {
+                "break_var": not_break,
+                "continue_var": not_continue,
+                "have_break": False,
+                "have_continue": False,
+            }
+        )
 
         payload = self.convert(for_statement.body)
         _iter = for_statement.iter
 
-        indicator = self.loop_control_stack.pop()  # 弹出中断指示器
+        loop_control_info = self.loop_control_stack.pop()
 
-        if indicator[3]:  # 如果包含continue/break
+        if loop_control_info["have_continue"]:
             reset_continue = ast.NamedExpr(
                 target=not_continue, value=ast.Constant(value=True)
             )
@@ -170,11 +176,11 @@ class Converter:
             else:
                 payload = ast.List(elts=[reset_continue, payload])
 
-        if indicator[2] or (self.isfunc and self.have_return):
+        if loop_control_info["have_break"] or (self.isfunc and self.have_return):
             # 如果包含break/return
             self.usesing_itertools = True
             not_interrupt = ast.BoolOp(op=ast.And(), values=[])
-            if indicator[2]:
+            if loop_control_info["have_break"]:
                 not_interrupt.values.append(not_break)
             if self.isfunc and self.have_return:
                 not_interrupt.values.append(self.not_return)
@@ -196,7 +202,7 @@ class Converter:
                 keywords=[],
             )
 
-        if indicator[2]:  # 如果包含break, 初始化break变量
+        if loop_control_info["have_break"]:  # 如果包含break, 初始化break变量
             out.append(ast.NamedExpr(target=not_break, value=ast.Constant(value=True)))
 
         for_body = ast.ListComp(
@@ -209,8 +215,8 @@ class Converter:
         )
         out.append(for_body)
 
-        if for_statement.orelse:
-            if indicator[2]:  # if have break
+        if for_statement.orelse:  # 处理else
+            if loop_control_info["have_break"]:
                 orelse = self.convert(
                     [ast.If(test=not_break, body=for_statement.orelse, orelse=[])]
                 )
@@ -227,15 +233,22 @@ class Converter:
         _id = unique_id()
         not_break = ast.Name(id="__ol_not_brk_" + _id)
         not_continue = ast.Name(id="__ol_not_cont_" + _id)
-        # 中断指示器入栈
-        self.loop_control_stack.append([not_break, not_continue, False, False])
+
+        self.loop_control_stack.append(
+            {
+                "break_var": not_break,
+                "continue_var": not_continue,
+                "have_break": False,
+                "have_continue": False,
+            }
+        )
 
         condition = while_statement.test
         payload = self.convert(while_statement.body)
 
-        indicator = self.loop_control_stack.pop()  # 弹出中断指示器
+        loop_control_info = self.loop_control_stack.pop()
 
-        if indicator[3]:  # 如果包含continue/break
+        if loop_control_info["have_continue"]:
             reset_continue = ast.NamedExpr(
                 target=not_continue, value=ast.Constant(value=True)
             )
@@ -245,7 +258,7 @@ class Converter:
             else:
                 payload = ast.List(elts=[reset_continue, payload])
 
-        if indicator[2]:  # 如果包含break
+        if loop_control_info["have_break"]:
             condition = ast.BoolOp(op=ast.And(), values=[not_break, condition])
 
             out.append(ast.NamedExpr(target=not_break, value=ast.Constant(value=True)))
@@ -255,8 +268,8 @@ class Converter:
 
         out.append(self.template_while(payload, condition))
 
-        if while_statement.orelse:
-            if indicator[2]:  # if have break
+        if while_statement.orelse:  # 处理else
+            if loop_control_info["have_break"]:
                 orelse = self.convert(
                     [ast.If(test=not_break, body=while_statement.orelse, orelse=[])]
                 )
@@ -276,10 +289,10 @@ class Converter:
                 ast.NamedExpr(target=ast.Name(id=tmp_variable_name), value=assign.value)
             )
 
-            for n, single_target in enumerate(_target.elts):
+            for ind, single_target in enumerate(_target.elts):
                 value = ast.Subscript(
                     value=ast.Name(id=tmp_variable_name),
-                    slice=ast.Constant(value=n),
+                    slice=ast.Constant(value=ind),
                 )
                 single_assign = self.template_auto_assign(single_target, value)
                 out.append(single_assign)
@@ -390,26 +403,26 @@ class Converter:
         ]
 
     def handle_break(self, break_statement: ast.Break) -> list:
-        self.loop_control_stack[-1][2] = True  # have break
-        self.loop_control_stack[-1][3] = True  # break includes continue
+        self.loop_control_stack[-1]["have_break"] = True  # have break
+        self.loop_control_stack[-1]["have_continue"] = True  # break includes continue
 
         return [
             ast.NamedExpr(
-                target=self.loop_control_stack[-1][1],
+                target=self.loop_control_stack[-1]["continue_var"],
                 value=ast.Constant(value=False),
             ),
             ast.NamedExpr(
-                target=self.loop_control_stack[-1][0],
+                target=self.loop_control_stack[-1]["break_var"],
                 value=ast.Constant(value=False),
             ),
         ]
 
     def handle_continue(self, continue_statement: ast.Continue) -> list:
-        self.loop_control_stack[-1][3] = True  # have continue
+        self.loop_control_stack[-1]["have_continue"] = True  # have continue
 
         return [
             ast.NamedExpr(
-                target=self.loop_control_stack[-1][1],
+                target=self.loop_control_stack[-1]["continue_var"],
                 value=ast.Constant(value=False),
             )
         ]
@@ -438,6 +451,7 @@ class Converter:
                     % (self.filename, node.lineno, type(node).__name__)
                 )
 
+            # Handle AST node
             out.extend(self.node_handler_map[type(node)](node))
 
             if type(node) in [ast.Continue, ast.Break, ast.Return]:
@@ -450,11 +464,11 @@ class Converter:
                 if (
                     isinstance(node, ast.If)
                     and self.loop_control_stack
-                    and self.loop_control_stack[-1][3]
+                    and self.loop_control_stack[-1]["have_continue"]
                 ):
                     out.append(
                         ast.IfExp(
-                            test=self.loop_control_stack[-1][1],
+                            test=self.loop_control_stack[-1]["continue_var"],
                             body=self.convert(body[n_body + 1 :]),
                             orelse=ast.Constant(value=None),
                         )
@@ -475,7 +489,6 @@ class Converter:
         if top_level:
             if self.isfunc:
                 if self.have_return:
-                    # inject not_return and return_value
                     _not_return_assign = ast.NamedExpr(
                         target=self.not_return, value=ast.Constant(value=True)
                     )
@@ -485,10 +498,8 @@ class Converter:
                     out.insert(0, _not_return_assign)
                     out.insert(0, _return_value_assign)
 
-                    # set the return value to return_value
                     out.append(self.return_value)
                 else:
-                    # set the return value to None
                     out.append(ast.Constant(value=None))
 
                 out = [
@@ -499,17 +510,15 @@ class Converter:
                 ]
 
             elif self.usesing_itertools:
-                out.insert(
-                    0,
-                    ast.NamedExpr(
-                        target=ast.Name(id="itertools"),
-                        value=ast.Call(
-                            func=ast.Name(id="__import__"),
-                            args=[ast.Constant(value="itertools")],
-                            keywords=[],
-                        ),
+                itertools_import = ast.NamedExpr(
+                    target=ast.Name(id="itertools"),
+                    value=ast.Call(
+                        func=ast.Name(id="__import__"),
+                        args=[ast.Constant(value="itertools")],
+                        keywords=[],
                     ),
                 )
+                out.insert(0, itertools_import)
 
         # Optimize output
         if len(out) == 0:
@@ -526,9 +535,9 @@ def convert_code_string(code: str, filename: Optional[str] = None) -> str:
     c = Converter()
     if filename is not None:
         c.set_filename(filename)
-    return ast.unparse(c.convert(ast.parse(code).body, top_level=True)).replace(
-        "\n", ""
-    )
+    return ast.unparse(
+        c.convert(ast.parse(code).body, top_level=True),
+    ).replace("\n", "")
 
 
 if __name__ == "__main__":
