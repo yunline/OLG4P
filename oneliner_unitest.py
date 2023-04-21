@@ -325,8 +325,11 @@ func(1,2,3,4,c=666,hello="world")
 
     def test_convert_function_return(self):
         script = """
-def func1():
+def func1a():
     pass
+
+def func1b():
+    print("Xd")
 
 def func2(c):
     if 1:
@@ -356,7 +359,8 @@ def func4(c):
     if 1:
         return 246
 
-print(func1())
+print(func1a())
+print(func1b())
 for func in [func2,func3,func4]:
     print(func(False))
     print(func(True))
