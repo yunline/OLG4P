@@ -22,7 +22,7 @@ def unique_id():
 
 
 class Converter:
-    def __init__(self, isfunc=False):
+    def __init__(self, isfunc: bool = False):
         self.isfunc = isfunc
         self.loop_control_stack = []
         # [[break_obj, continue_obj, have_break, have_continue], ...]
@@ -49,7 +49,7 @@ class Converter:
         }
 
     @staticmethod
-    def template_subscript_assign(target: ast.Subscript, value) -> ast.AST:
+    def template_subscript_assign(target: ast.Subscript, value: ast.AST) -> ast.AST:
         _slice = target.slice
         if isinstance(target.slice, ast.Slice):
             _slice = ast.Call(func=ast.Name(id="slice"), args=[], keywords=[])
@@ -71,7 +71,7 @@ class Converter:
         return out
 
     @staticmethod
-    def template_attribute_assign(target: ast.Attribute, value) -> ast.AST:
+    def template_attribute_assign(target: ast.Attribute, value: ast.AST) -> ast.AST:
         out = ast.Call(
             func=ast.Attribute(value=target.value, attr="__setattr__"),
             args=[ast.Constant(value=target.attr), value],
@@ -79,7 +79,7 @@ class Converter:
         )
         return out
 
-    def template_auto_assign(self, target, value) -> ast.AST:
+    def template_auto_assign(self, target: ast.AST, value: ast.AST) -> ast.AST:
         if isinstance(target, ast.Name):
             out = ast.NamedExpr(target=target, value=value)
         elif isinstance(target, ast.Subscript):
@@ -92,7 +92,7 @@ class Converter:
         return out
 
     @staticmethod
-    def template_while(payload, condition) -> ast.AST:
+    def template_while(payload: ast.AST, condition: ast.AST) -> ast.AST:
         takewhile_args = [
             ast.Lambda(
                 args=ast.arguments(
@@ -420,7 +420,7 @@ class Converter:
     def handle_expr(self, expr: ast.Expr) -> list:
         return [expr]
 
-    def convert(self, body: list[ast.AST], top_level=False) -> ast.AST:
+    def convert(self, body: list[ast.AST], top_level: bool = False) -> ast.AST:
         out = []
 
         for n_body, node in enumerate(body):
@@ -515,7 +515,7 @@ class Converter:
         return out_node
 
 
-def convert_code_string(code: str):
+def convert_code_string(code: str) -> str:
     c = Converter()
     return ast.unparse(c.convert(ast.parse(code).body, top_level=True)).replace(
         "\n", ""
@@ -535,7 +535,7 @@ Options:
 
     argv = sys.argv[1:]
 
-    def parse_param(param, has_option=True):
+    def parse_param(param: str, has_option: bool = True):
         if param not in argv:
             return (False, "")
         index = argv.index(param)
