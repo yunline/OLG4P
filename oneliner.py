@@ -76,6 +76,44 @@ class Converter:
         return out
 
     @staticmethod
+    def template_while(payload, condition):
+        takewhile_args = [
+            ast.Lambda(
+                args=ast.arguments(
+                    posonlyargs=[],
+                    args=[ast.arg(arg="_")],
+                    kwonlyargs=[],
+                    kw_defaults=[],
+                    defaults=[],
+                ),
+                body=condition,
+            ),
+            ast.Call(
+                func=ast.Attribute(value=ast.Name(id="itertools"), attr="count"),
+                args=[],
+                keywords=[],
+            ),
+        ]
+        out = ast.ListComp(
+            elt=payload,
+            generators=[
+                ast.comprehension(
+                    target=ast.Name(id="_"),
+                    iter=ast.Call(
+                        func=ast.Attribute(
+                            value=ast.Name(id="itertools"), attr="takewhile"
+                        ),
+                        args=takewhile_args,
+                        keywords=[],
+                    ),
+                    ifs=[],
+                    is_async=0,
+                )
+            ],
+        )
+        return out
+
+    @staticmethod
     def arg_remove_annotation(arg: ast.arguments):
         # Warning: In place operation
         if arg.vararg is not None:
@@ -85,6 +123,129 @@ class Converter:
         for args in [arg.posonlyargs, arg.args, arg.kwonlyargs]:
             for _arg in args:
                 _arg.annotation = None
+
+    def handle_for(self, for_statement: ast.For, recursion) -> list:
+        out = []
+        global usesing_itertools
+
+        _id = unique_id()
+        not_break = ast.Name(id="__ol_not_brk_" + _id)
+        not_continue = ast.Name(id="__ol_not_cont_" + _id)
+        # 中断指示器入栈
+        self.loop_control_stack.append([not_break, not_continue, False, False])
+
+        payload = self.convert(for_statement.body, recursion + 1)
+        _iter = for_statement.iter
+
+        indicator = self.loop_control_stack.pop()  # 弹出中断指示器
+
+        if indicator[3]:  # 如果包含continue/break
+            reset_continue = ast.NamedExpr(
+                target=not_continue, value=ast.Constant(value=True)
+            )
+
+            if isinstance(payload, ast.List):
+                payload.elts.insert(0, reset_continue)
+            else:
+                payload = ast.List(elts=[reset_continue, payload])
+
+        if indicator[2] or (self.isfunc and self.have_return):
+            # 如果包含break/return
+            usesing_itertools = True
+            not_interrupt = ast.BoolOp(op=ast.And(), values=[])
+            if indicator[2]:
+                not_interrupt.values.append(not_break)
+            if self.isfunc and self.have_return:
+                not_interrupt.values.append(self.not_return)
+            _iter = ast.Call(
+                func=ast.Attribute(value=ast.Name(id="itertools"), attr="takewhile"),
+                args=[
+                    ast.Lambda(
+                        args=ast.arguments(
+                            posonlyargs=[],
+                            args=[ast.arg(arg="_")],
+                            kwonlyargs=[],
+                            kw_defaults=[],
+                            defaults=[],
+                        ),
+                        body=not_interrupt,
+                    ),
+                    _iter,
+                ],
+                keywords=[],
+            )
+
+        if indicator[2]:  # 如果包含break, 初始化break变量
+            out.append(ast.NamedExpr(target=not_break, value=ast.Constant(value=True)))
+
+        for_body = ast.ListComp(
+            elt=payload,
+            generators=[
+                ast.comprehension(
+                    target=for_statement.target, iter=_iter, ifs=[], is_async=False
+                )
+            ],
+        )
+        out.append(for_body)
+
+        if for_statement.orelse:
+            if indicator[2]:  # if have break
+                orelse = self.convert(
+                    [ast.If(test=not_break, body=for_statement.orelse, orelse=[])],
+                    recursion + 1,
+                )
+            else:
+                orelse = self.convert(for_statement.orelse, recursion + 1)
+            out.append(orelse)
+
+        return out
+
+    def handle_while(self, while_statement: ast.While, recursion) -> list:
+        out = []
+        global usesing_itertools
+        usesing_itertools = True
+
+        _id = unique_id()
+        not_break = ast.Name(id="__ol_not_brk_" + _id)
+        not_continue = ast.Name(id="__ol_not_cont_" + _id)
+        # 中断指示器入栈
+        self.loop_control_stack.append([not_break, not_continue, False, False])
+
+        condition = while_statement.test
+        payload = self.convert(while_statement.body, recursion + 1)
+
+        indicator = self.loop_control_stack.pop()  # 弹出中断指示器
+
+        if indicator[3]:  # 如果包含continue/break
+            reset_continue = ast.NamedExpr(
+                target=not_continue, value=ast.Constant(value=True)
+            )
+
+            if isinstance(payload, ast.List):
+                payload.elts.insert(0, reset_continue)
+            else:
+                payload = ast.List(elts=[reset_continue, payload])
+
+        if indicator[2]:  # 如果包含break
+            condition = ast.BoolOp(op=ast.And(), values=[not_break, condition])
+
+            out.append(ast.NamedExpr(target=not_break, value=ast.Constant(value=True)))
+
+        if self.isfunc and self.have_return:  # 如果包含return
+            condition = ast.BoolOp(op=ast.And(), values=[self.not_return, condition])
+
+        out.append(self.template_while(payload, condition))
+
+        if while_statement.orelse:
+            if indicator[2]:  # if have break
+                orelse = self.convert(
+                    [ast.If(test=not_break, body=while_statement.orelse, orelse=[])],
+                    recursion + 1,
+                )
+            else:
+                orelse = self.convert(while_statement.orelse, recursion + 1)
+            out.append(orelse)
+        return out
 
     def convert(self, body: list, recursion: int = 0):
         out_node = ast.List([])
@@ -101,94 +262,6 @@ class Converter:
                     ),
                 ),
             )
-
-        def handle_while(while_statement: ast.While):
-            global usesing_itertools
-            usesing_itertools = True
-
-            _id = unique_id()
-            not_break = ast.Name(id="__ol_not_brk_" + _id)
-            not_continue = ast.Name(id="__ol_not_cont_" + _id)
-            # 中断指示器入栈
-            self.loop_control_stack.append([not_break, not_continue, False, False])
-
-            condition = while_statement.test
-            payload = self.convert(while_statement.body, recursion + 1)
-
-            indicator = self.loop_control_stack.pop()  # 弹出中断指示器
-
-            if indicator[3]:  # 如果包含continue/break
-                reset_continue = ast.NamedExpr(
-                    target=not_continue, value=ast.Constant(value=True)
-                )
-
-                if isinstance(payload, ast.List):
-                    payload.elts.insert(0, reset_continue)
-                else:
-                    payload = ast.List(elts=[reset_continue, payload])
-
-            if indicator[2]:  # 如果包含break
-                condition = ast.BoolOp(op=ast.And(), values=[not_break, condition])
-
-                out_node.elts.append(
-                    ast.NamedExpr(target=not_break, value=ast.Constant(value=True))
-                )
-
-            if self.isfunc and self.have_return:  # 如果包含return
-                condition = ast.BoolOp(
-                    op=ast.And(), values=[self.not_return, condition]
-                )
-
-            out = ast.ListComp(
-                elt=payload,
-                generators=[
-                    ast.comprehension(
-                        target=ast.Name(id="_"),
-                        iter=ast.Call(
-                            func=ast.Attribute(
-                                value=ast.Name(id="itertools"), attr="takewhile"
-                            ),
-                            args=[
-                                ast.Lambda(
-                                    args=ast.arguments(
-                                        posonlyargs=[],
-                                        args=[ast.arg(arg="_")],
-                                        kwonlyargs=[],
-                                        kw_defaults=[],
-                                        defaults=[],
-                                    ),
-                                    body=condition,
-                                ),
-                                ast.Call(
-                                    func=ast.Attribute(
-                                        value=ast.Name(id="itertools"), attr="count"
-                                    ),
-                                    args=[],
-                                    keywords=[],
-                                ),
-                            ],
-                            keywords=[],
-                        ),
-                        ifs=[],
-                        is_async=0,
-                    )
-                ],
-            )
-            out_node.elts.append(out)
-
-            if while_statement.orelse:
-                if indicator[2]:  # if have break
-                    orelse = self.convert(
-                        [
-                            ast.If(
-                                test=not_break, body=while_statement.orelse, orelse=[]
-                            )
-                        ],
-                        recursion + 1,
-                    )
-                else:
-                    orelse = self.convert(while_statement.orelse, recursion + 1)
-                out_node.elts.append(orelse)
 
         def handle_assign(assign: ast.Assign):
             _target = assign.targets[0]
@@ -255,82 +328,6 @@ class Converter:
                 )
             )
             out_node.elts.append(out)
-
-        def handle_for(for_statement: ast.For):
-            global usesing_itertools
-            _id = unique_id()
-            not_break = ast.Name(id="__ol_not_brk_" + _id)
-            not_continue = ast.Name(id="__ol_not_cont_" + _id)
-            # 中断指示器入栈
-            self.loop_control_stack.append([not_break, not_continue, False, False])
-
-            payload = self.convert(for_statement.body, recursion + 1)
-            _iter = for_statement.iter
-
-            indicator = self.loop_control_stack.pop()  # 弹出中断指示器
-
-            if indicator[3]:  # 如果包含continue/break
-                reset_continue = ast.NamedExpr(
-                    target=not_continue, value=ast.Constant(value=True)
-                )
-
-                if isinstance(payload, ast.List):
-                    payload.elts.insert(0, reset_continue)
-                else:
-                    payload = ast.List(elts=[reset_continue, payload])
-
-            if indicator[2] or (self.isfunc and self.have_return):
-                # 如果包含break/return
-                usesing_itertools = True
-                not_interrupt = ast.BoolOp(op=ast.And(), values=[])
-                if indicator[2]:
-                    not_interrupt.values.append(not_break)
-                if self.isfunc and self.have_return:
-                    not_interrupt.values.append(self.not_return)
-                _iter = ast.Call(
-                    func=ast.Attribute(
-                        value=ast.Name(id="itertools"), attr="takewhile"
-                    ),
-                    args=[
-                        ast.Lambda(
-                            args=ast.arguments(
-                                posonlyargs=[],
-                                args=[ast.arg(arg="_")],
-                                kwonlyargs=[],
-                                kw_defaults=[],
-                                defaults=[],
-                            ),
-                            body=not_interrupt,
-                        ),
-                        _iter,
-                    ],
-                    keywords=[],
-                )
-
-            if indicator[2]:  # 如果包含break, 初始化break变量
-                out_node.elts.append(
-                    ast.NamedExpr(target=not_break, value=ast.Constant(value=True))
-                )
-
-            out = ast.ListComp(
-                elt=payload,
-                generators=[
-                    ast.comprehension(
-                        target=for_statement.target, iter=_iter, ifs=[], is_async=False
-                    )
-                ],
-            )
-            out_node.elts.append(out)
-
-            if for_statement.orelse:
-                if indicator[2]:  # if have break
-                    orelse = self.convert(
-                        [ast.If(test=not_break, body=for_statement.orelse, orelse=[])],
-                        recursion + 1,
-                    )
-                else:
-                    orelse = self.convert(for_statement.orelse, recursion + 1)
-                out_node.elts.append(orelse)
 
         def handle_import(import_statement: ast.Import):
             # Example:
@@ -425,7 +422,7 @@ class Converter:
             if isinstance(node, ast.Expr):
                 out_node.elts.append(node)
             elif isinstance(node, ast.For):
-                handle_for(node)
+                out_node.elts.extend(self.handle_for(node, recursion))
             elif isinstance(node, ast.If):
                 handle_if(node)
             elif isinstance(node, ast.Pass):
@@ -439,7 +436,7 @@ class Converter:
             elif isinstance(node, ast.Import):
                 handle_import(node)
             elif isinstance(node, ast.While):
-                handle_while(node)
+                out_node.elts.extend(self.handle_while(node, recursion))
             elif isinstance(node, ast.Continue):
                 handle_continue()
                 break  # 中断
