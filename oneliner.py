@@ -78,9 +78,9 @@ class Converter:
     @staticmethod
     def arg_remove_annotation(arg: ast.arguments):
         # Warning: In place operation
-        if not arg.vararg is None:
+        if arg.vararg is not None:
             arg.vararg.annotation = None
-        if not arg.kwarg is None:
+        if arg.kwarg is not None:
             arg.kwarg.annotation = None
         for args in [arg.posonlyargs, arg.args, arg.kwonlyargs]:
             for _arg in args:
@@ -279,7 +279,8 @@ class Converter:
                 else:
                     payload = ast.List(elts=[reset_continue, payload])
 
-            if indicator[2] or (self.isfunc and self.have_return):  # 如果包含break/return
+            if indicator[2] or (self.isfunc and self.have_return):
+                # 如果包含break/return
                 usesing_itertools = True
                 not_interrupt = ast.BoolOp(op=ast.And(), values=[])
                 if indicator[2]:
@@ -452,7 +453,8 @@ class Converter:
                 handle_def(node)
             else:
                 raise ConvertError(
-                    'Convert failed.\nError: "%s", line %d, Statement "%s" is not convertable.'
+                    'Convert failed.\nError: "%s", '
+                    'line %d, Statement "%s" is not convertable.'
                     % (filename, node.lineno, type(node).__name__)
                 )
 
@@ -539,7 +541,7 @@ Options:
     argv = sys.argv[1:]
 
     def parse_param(param, has_option=True):
-        if not param in argv:
+        if param not in argv:
             return (False, "")
         index = argv.index(param)
         if not has_option:
