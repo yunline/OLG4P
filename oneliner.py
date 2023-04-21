@@ -379,15 +379,15 @@ class Converter:
 
         def handle_def(def_statement: ast.FunctionDef):
             converter = Converter(isfunc=True)
-            out = ast.NamedExpr(
-                target=ast.Name(id=def_statement.name),
-                value=ast.Lambda(
-                    args=def_statement.args,
-                    body=converter.convert(def_statement.body, 0),
-                ),
+            function_body = ast.Lambda(
+                args=def_statement.args,
+                body=converter.convert(def_statement.body, 0),
             )
             for dec in def_statement.decorator_list[::-1]:  # handle decorators
-                out = ast.Call(func=dec, args=[out], keywords=[])
+                function_body = ast.Call(func=dec, args=[function_body], keywords=[])
+            out = ast.NamedExpr(
+                target=ast.Name(id=def_statement.name), value=function_body
+            )
             out_node.elts.append(out)
 
         def handle_return(return_statement: ast.Return):

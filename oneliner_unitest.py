@@ -372,18 +372,23 @@ for func in [func2,func3,func4]:
     def test_convert_function_decorator(self):
         script = """
 def dec1(f):
-    print("dec1")
-    return f
+    def _f():
+        print("dec1")
+        f()
+    return _f
 
 def dec2(f):
-    print("dec2")
-    return f
+    def _f():
+        print("dec2")
+        f()
+    return _f
 
 @dec2
 @dec1
 def func():
     print("func")
 
+func()
 """
         self.check_convert(script)
 
