@@ -32,6 +32,22 @@ class Converter:
             self.return_value = ast.Name(id="__ol_return_value_" + _id)
             self.have_return = False
 
+        self.node_handler_map = {
+            ast.Expr: self.handle_expr,
+            ast.For: self.handle_for,
+            ast.If: self.handle_if,
+            ast.Pass: self.handle_pass,
+            ast.Assign: self.handle_assign,
+            ast.AnnAssign: self.handle_ann_assign,
+            ast.AugAssign: self.handle_aug_assign,
+            ast.Import: self.handle_import,
+            ast.While: self.handle_while,
+            ast.FunctionDef: self.handle_def,
+            ast.Continue: self.handle_continue,
+            ast.Break: self.handle_break,
+            ast.Return: self.handle_return,
+        }
+
     @staticmethod
     def template_subscript_assign(target: ast.Subscript, value) -> ast.AST:
         _slice = target.slice
@@ -428,38 +444,14 @@ class Converter:
             return out_node
 
         for n_body, node in enumerate(body):
-            if isinstance(node, ast.Expr):
-                out_node.elts.extend(self.handle_expr(node))
-            elif isinstance(node, ast.For):
-                out_node.elts.extend(self.handle_for(node))
-            elif isinstance(node, ast.If):
-                out_node.elts.extend(self.handle_if(node))
-            elif isinstance(node, ast.Pass):
-                out_node.elts.extend(self.handle_pass(node))
-            elif isinstance(node, ast.Assign):
-                out_node.elts.extend(self.handle_assign(node))
-            elif isinstance(node, ast.AnnAssign):
-                out_node.elts.extend(self.handle_ann_assign(node))
-            elif isinstance(node, ast.AugAssign):
-                out_node.elts.extend(self.handle_aug_assign(node))
-            elif isinstance(node, ast.Import):
-                out_node.elts.extend(self.handle_import(node))
-            elif isinstance(node, ast.While):
-                out_node.elts.extend(self.handle_while(node))
-            elif isinstance(node, ast.FunctionDef):
-                out_node.elts.extend(self.handle_def(node))
-            elif isinstance(node, ast.Continue):
-                out_node.elts.extend(self.handle_continue(node))
-            elif isinstance(node, ast.Break):
-                out_node.elts.extend(self.handle_break(node))
-            elif isinstance(node, ast.Return):
-                out_node.elts.extend(self.handle_return(node))
-            else:
+            if type(node) not in self.node_handler_map:
                 raise ConvertError(
                     'Convert failed.\nError: "%s", '
                     'line %d, Statement "%s" is not convertable.'
                     % (filename, node.lineno, type(node).__name__)
                 )
+
+            out_node.elts.extend(self.node_handler_map[type(node)](node))
 
             if type(node) in [ast.Continue, ast.Break, ast.Return]:
                 break
