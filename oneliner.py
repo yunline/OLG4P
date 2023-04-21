@@ -423,26 +423,6 @@ class Converter:
     def convert(self, body: list, top_level=False):
         out_node = ast.List([])
 
-        def inject_itertools():
-            out_node.elts.insert(
-                0,
-                ast.NamedExpr(
-                    target=ast.Name(id="itertools"),
-                    value=ast.Call(
-                        func=ast.Name(id="__import__"),
-                        args=[ast.Constant(value="itertools")],
-                        keywords=[],
-                    ),
-                ),
-            )
-
-        def post_process(out_node):  # Output optimization
-            if len(out_node.elts) == 0:
-                out_node = ast.Expr(value=ast.Constant(value=None))
-            elif len(out_node.elts) == 1:
-                out_node = out_node.elts[0]
-            return out_node
-
         for n_body, node in enumerate(body):
             if type(node) not in self.node_handler_map:
                 raise ConvertError(
@@ -513,9 +493,23 @@ class Converter:
                 )
 
             elif usesing_itertools:
-                inject_itertools()
+                out_node.elts.insert(
+                    0,
+                    ast.NamedExpr(
+                        target=ast.Name(id="itertools"),
+                        value=ast.Call(
+                            func=ast.Name(id="__import__"),
+                            args=[ast.Constant(value="itertools")],
+                            keywords=[],
+                        ),
+                    ),
+                )
 
-        out_node = post_process(out_node)
+        # Optimize output
+        if len(out_node.elts) == 0:
+            out_node = ast.Constant(value=None)
+        elif len(out_node.elts) == 1:
+            out_node = out_node.elts[0]
 
         return out_node
 
