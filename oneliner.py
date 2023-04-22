@@ -428,9 +428,12 @@ class Converter:
 
     def handle_return(self, return_statement: ast.Return) -> list:
         self.have_return = True
+        return_value = return_statement.value
+        if return_value is None:
+            return_value = ast.Constant(value=None)
         return [
             ast.NamedExpr(target=self.not_return, value=ast.Constant(value=False)),
-            ast.NamedExpr(target=self.return_value, value=return_statement.value),
+            ast.NamedExpr(target=self.return_value, value=return_value),
         ]
 
     def handle_pass(self, pass_statement: ast.Pass) -> list:
