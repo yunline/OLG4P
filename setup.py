@@ -6,7 +6,7 @@ with open(os.path.join(os.path.dirname(__file__), "README.md")) as file:
 
 setup(
     name="OLG4P",
-    version="1.0",
+    version="0.1",
     url="https://github.com/yunline/OLG4P",
     description="Convert python script into python one-liner",
     long_description=long_description,
