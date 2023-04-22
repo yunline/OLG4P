@@ -463,26 +463,34 @@ class Converter:
                 # 如果在分支之后还有语句
                 # 且在分支中有continue/break/return
                 # 则判断是否中断，再执行
+
+                interrupt_list = []
+
                 if (
                     isinstance(node, ast.If)
                     and len(self.loop_control_stack)
                     and self.loop_control_stack[-1]["have_continue"]
                 ):
-                    check_continue = ast.IfExp(
-                        test=self.loop_control_stack[-1]["continue_var"],
-                        body=self.convert(nodes[node_index + 1 :]),
-                        orelse=ast.Constant(value=None),
-                    )
-                    out.append(check_continue)
-                    if not self.isfunc:
-                        break
+                    interrupt_list.append(self.loop_control_stack[-1]["continue_var"])
+
                 if self.isfunc and self.have_return:
-                    check_return = ast.IfExp(
-                        test=self.not_return,
+                    interrupt_list.append(self.not_return)
+
+                if interrupt_list:
+                    if len(interrupt_list) == 1:
+                        interrupt_check = interrupt_list[0]
+                    else:
+                        interrupt_check = ast.BoolOp(
+                            op=ast.And(),
+                            values=interrupt_list,
+                        )
+
+                    check_interrupt_expr = ast.IfExp(
+                        test=interrupt_check,
                         body=self.convert(nodes[node_index + 1 :]),
                         orelse=ast.Constant(value=None),
                     )
-                    out.append(check_return)
+                    out.append(check_interrupt_expr)
                     break
 
         if top_level:
