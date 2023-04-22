@@ -1,6 +1,15 @@
 # One-Liner Generator for Python
 
-A simple script that converts python scripts into only one line. 
+A simple script that converts python scripts into one-liner. 
+
+## Install
+```
+pip install OLG4P
+```
+
+## Usage
+`python3 -m oneliner [input file] -o [output file]`  
+Or use `python3 -m oneliner -h` for help.
 
 ## Example
 **InputFile:**
@@ -21,11 +30,6 @@ while y<h*2:
 ```python
 [(itertools := __import__('itertools')), (random := __import__('random')), [(__ol_assign_tmp_nxazjlgisn := (0, 2)), (y := __ol_assign_tmp_nxazjlgisn[0]), (h := __ol_assign_tmp_nxazjlgisn[1])], (msg := 'hello_world'), [[[print(random.choice('/\\'), end='') for x in range(len(msg) + 2)], y.__iadd__(1) if hasattr(y, '__iadd__') else (y := (y + 1)), print('\n %s ' % msg) if y == h else print('')] for _ in itertools.takewhile(lambda _: y < h * 2, itertools.count())]]
 ```
-![](img/2023-03-12-15-50-25.png)
-
-## Usage
-`python oneliner.py [input file] -o [output file]`  
-Or use `python oneliner.py -h` for help.
 
 ## Limitation
 This script requires python3.9+. Many statements are not convertable.  
