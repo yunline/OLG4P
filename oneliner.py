@@ -1,6 +1,6 @@
 import ast
 import random
-from typing import Optional
+from typing import Optional, List
 
 random.seed(12345)
 
@@ -94,8 +94,7 @@ class Converter:
         else:
             if hasattr(target, "lineno"):
                 raise ConvertError(f"Unknown assign type at line {target.lineno}")
-            else:
-                raise ConvertError("Unknown assign type")
+            raise ConvertError("Unknown assign type")
 
         return out
 
@@ -440,15 +439,15 @@ class Converter:
     def handle_expr(self, expr: ast.Expr) -> list:
         return [expr]
 
-    def convert(self, body: list[ast.AST], top_level: bool = False) -> ast.AST:
+    def convert(self, nodes: List[ast.AST], top_level: bool = False) -> ast.AST:
         out = []
 
-        for n_body, node in enumerate(body):
+        for node_index, node in enumerate(nodes):
             if type(node) not in self.node_handler_map:
                 raise ConvertError(
-                    'Convert failed.\nError: "%s", '
-                    'line %d, Statement "%s" is not convertable.'
-                    % (self.filename, node.lineno, type(node).__name__)
+                    f'Convert failed.\nError: "{self.filename}", '
+                    f"line {node.lineno}, "
+                    f'Statement "{type(node).__name__}" is not convertable.'
                 )
 
             # Handle AST node
@@ -457,43 +456,42 @@ class Converter:
             if type(node) in [ast.Continue, ast.Break, ast.Return]:
                 break
 
-            if body[n_body + 1 :]:
+            if nodes[node_index + 1 :] and type(node) in [ast.For, ast.While, ast.If]:
                 # 如果在分支之后还有语句
                 # 且在分支中有continue/break/return
                 # 则判断是否中断，再执行
                 if (
                     isinstance(node, ast.If)
-                    and self.loop_control_stack
+                    and len(self.loop_control_stack)
                     and self.loop_control_stack[-1]["have_continue"]
                 ):
-                    out.append(
-                        ast.IfExp(
-                            test=self.loop_control_stack[-1]["continue_var"],
-                            body=self.convert(body[n_body + 1 :]),
-                            orelse=ast.Constant(value=None),
-                        )
+                    check_continue = ast.IfExp(
+                        test=self.loop_control_stack[-1]["continue_var"],
+                        body=self.convert(nodes[node_index + 1 :]),
+                        orelse=ast.Constant(value=None),
                     )
+                    out.append(check_continue)
                     if not self.isfunc:
                         break
-                if self.isfunc and type(node) in [ast.For, ast.While, ast.If]:
-                    if self.have_return:
-                        out.append(
-                            ast.IfExp(
-                                test=self.not_return,
-                                body=self.convert(body[n_body + 1 :]),
-                                orelse=ast.Constant(value=None),
-                            )
-                        )
-                        break
+                if self.isfunc and self.have_return:
+                    check_return = ast.IfExp(
+                        test=self.not_return,
+                        body=self.convert(nodes[node_index + 1 :]),
+                        orelse=ast.Constant(value=None),
+                    )
+                    out.append(check_return)
+                    break
 
         if top_level:
             if self.isfunc:
                 if self.have_return:
                     _not_return_assign = ast.NamedExpr(
-                        target=self.not_return, value=ast.Constant(value=True)
+                        target=self.not_return,
+                        value=ast.Constant(value=True),
                     )
                     _return_value_assign = ast.NamedExpr(
-                        target=self.return_value, value=ast.Constant(value=None)
+                        target=self.return_value,
+                        value=ast.Constant(value=None),
                     )
                     out.insert(0, _not_return_assign)
                     out.insert(0, _return_value_assign)
