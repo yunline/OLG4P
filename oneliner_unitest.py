@@ -375,6 +375,10 @@ for func in [func1,func2,func3]:
     print(func(False))
     print(func(True))
 
+def func():
+    return
+print(func())
+
 """
 
         self.check_convert(script)
