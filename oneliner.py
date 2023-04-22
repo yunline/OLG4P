@@ -540,6 +540,8 @@ def convert_code_string(code: str, filename: Optional[str] = None) -> str:
     ).replace("\n", "")
 
 
+__all__ = ["ConvertError", "Converter", "convert_code_string"]
+
 if __name__ == "__main__":
     import sys
     import os
