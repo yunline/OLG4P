@@ -92,7 +92,10 @@ class Converter:
         elif isinstance(target, ast.Attribute):
             out = self.template_attribute_assign(target, value)
         else:
-            raise ConvertError("Unknown assign type")
+            if hasattr(target, "lineno"):
+                raise ConvertError(f"Unknown assign type at line {target.lineno}")
+            else:
+                raise ConvertError("Unknown assign type")
 
         return out
 
@@ -298,10 +301,7 @@ class Converter:
                 out.append(single_assign)
 
         else:
-            try:
-                out.append(self.template_auto_assign(_target, assign.value))
-            except ConvertError:
-                raise ConvertError("Unknown assign type at line %d" % assign.lineno)
+            out.append(self.template_auto_assign(_target, assign.value))
         return out
 
     def handle_aug_assign(self, assign: ast.AugAssign) -> list:
