@@ -301,10 +301,28 @@ print('urllib' in globals())
 class FunctionConvertTest(unittest.TestCase, OnelinerTestBase):
     def test_convert_function(self):
         script = """
-def func():
+def func1():
+    pass
+
+def func2():
+    print("Xd")
+
+def func3():
+    i=0
+    while i==0:
+        i=1
+        print("awa")
+    if i==1:
+        print("qwq")
+    for i in range(1):
+        print("xd")
+    for j in range(1):
+        print("dx")
     print("hello")
-for i in range(3):
-    func()
+
+func1()
+func2()
+func3()
 """
 
         self.check_convert(script)
@@ -325,20 +343,14 @@ func(1,2,3,4,c=666,hello="world")
 
     def test_convert_function_return(self):
         script = """
-def func1a():
-    pass
-
-def func1b():
-    print("Xd")
-
-def func2(c):
+def func1(c):
     if 1:
         if c:
             return 123
         print('Xd')
     return 246
 
-def func3(c):
+def func2(c):
     for i in range(100):
         if i==10 and c:
             return 123
@@ -349,7 +361,7 @@ def func3(c):
     print("xd")
     return 246
 
-def func4(c):
+def func3(c):
     while 1:
         if c:
             return 123
@@ -359,9 +371,7 @@ def func4(c):
     if 1:
         return 246
 
-print(func1a())
-print(func1b())
-for func in [func2,func3,func4]:
+for func in [func1,func2,func3]:
     print(func(False))
     print(func(True))
 

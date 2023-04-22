@@ -484,7 +484,7 @@ class Converter:
                                 orelse=ast.Constant(value=None),
                             )
                         )
-                    break
+                        break
 
         if top_level:
             if self.isfunc:
