@@ -371,7 +371,16 @@ def func3(c):
     if 1:
         return 246
 
-for func in [func1,func2,func3]:
+def func4(c):
+    for i in range(5):
+        if i==3:
+            return 123
+            
+        elif i==2:
+            continue
+        print(i)
+
+for func in [func1,func2,func3,func4]:
     print(func(False))
     print(func(True))
 
