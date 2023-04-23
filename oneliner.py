@@ -159,6 +159,81 @@ def template_while(payload: ast.AST, condition: ast.AST) -> ast.AST:
     return out
 
 
+def template_global_assign_function() -> ast.AST:
+    return ast.NamedExpr(
+        target=ast.Name(id="__ol_global_assign", ctx=ast.Store()),
+        value=ast.Lambda(
+            args=ast.arguments(
+                posonlyargs=[],
+                args=[
+                    ast.arg(arg="name"),
+                    ast.arg(arg="value"),
+                ],
+                kwonlyargs=[],
+                kw_defaults=[],
+                defaults=[],
+            ),
+            body=ast.Subscript(
+                value=ast.List(
+                    elts=[
+                        ast.Call(
+                            func=ast.Attribute(
+                                value=ast.Call(
+                                    func=ast.Name(id="globals", ctx=ast.Load()),
+                                    args=[],
+                                    keywords=[],
+                                ),
+                                attr="__setitem__",
+                                ctx=ast.Load(),
+                            ),
+                            args=[
+                                ast.Name(id="name", ctx=ast.Load()),
+                                ast.Name(id="value", ctx=ast.Load()),
+                            ],
+                            keywords=[],
+                        ),
+                        ast.Subscript(
+                            value=ast.Call(
+                                func=ast.Name(id="globals", ctx=ast.Load()),
+                                args=[],
+                                keywords=[],
+                            ),
+                            slice=ast.Name(id="name", ctx=ast.Load()),
+                            ctx=ast.Load(),
+                        ),
+                    ],
+                    ctx=ast.Load(),
+                ),
+                slice=ast.Constant(value=1),
+                ctx=ast.Load(),
+            ),
+        ),
+    )
+
+
+class PostProcessor:
+    def run(self, node: ast.AST) -> None:
+        raise NotImplementedError()
+
+
+class GlobalAssignPostProcessor(ast.NodeTransformer, PostProcessor):
+    def __init__(self, names, global_names):
+        self.names = names
+        self.global_names = global_names
+
+    def visit_NamedExpr(self, node: ast.NamedExpr):
+        if node.target.id not in self.global_names:
+            return node
+        return ast.Call(
+            func=ast.Name(id="__ol_global_assign", ctx=ast.Load()),
+            args=[ast.Constant(value=node.target.id), node.value],
+            keywords=[],
+        )
+
+    def run(self, node: ast.AST) -> None:
+        self.visit(node)
+
+
 class Converter:
     def __init__(self, isfunc: bool = False) -> None:
         self.isfunc = isfunc
@@ -166,8 +241,11 @@ class Converter:
         self.loop_control_stack = []
         self.names: set[str] = set()
 
-        self.usesing_itertools = False
+        self.using_itertools = False
+        self.using_global = False
         self.filename = "<string>"
+        self.post_processors = []
+        self.non_func_post_processors = []
 
         if isfunc:
             _id = unique_id()
@@ -175,6 +253,9 @@ class Converter:
             self.return_value = ast.Name(id="__ol_return_value_" + _id)
             self.have_return = False
             self.global_names: set[str] = set()
+            self.func_post_processors = [
+                GlobalAssignPostProcessor(self.names, self.global_names),
+            ]
 
         self.node_handler_map = {
             ast.Expr: self.handle_expr,
@@ -235,7 +316,7 @@ class Converter:
 
         if loop_control_info["have_break"] or (self.isfunc and self.have_return):
             # 如果包含break/return
-            self.usesing_itertools = True
+            self.using_itertools = True
             not_interrupt = ast.BoolOp(op=ast.And(), values=[])
             if loop_control_info["have_break"]:
                 not_interrupt.values.append(not_break)
@@ -295,7 +376,7 @@ class Converter:
 
     def handle_while(self, while_statement: ast.While) -> list[ast.AST]:
         out = []
-        self.usesing_itertools = True
+        self.using_itertools = True
 
         _id = unique_id()
         not_break = ast.Name(id="__ol_not_brk_" + _id)
@@ -463,8 +544,8 @@ class Converter:
             args=def_statement.args,
             body=converter.convert(def_statement.body, top_level=True),
         )
-        if converter.usesing_itertools:
-            self.usesing_itertools = True
+        self.using_itertools |= converter.using_itertools
+        self.using_global |= converter.using_global
         for dec in def_statement.decorator_list[::-1]:  # handle decorators
             function_body = ast.Call(
                 func=dec,
@@ -525,6 +606,7 @@ class Converter:
     def handle_global(self, global_statement: ast.Global) -> list[ast.AST]:
         if not self.isfunc:
             return []
+        self.using_global = True
         for name in global_statement.names:
             if name in self.names:
                 raise SyntaxError(
@@ -613,16 +695,19 @@ class Converter:
                     )
                 ]
 
-            elif self.usesing_itertools:
-                itertools_import = ast.NamedExpr(
-                    target=ast.Name(id="itertools", ctx=ast.Store()),
-                    value=ast.Call(
-                        func=ast.Name(id="__import__", ctx=ast.Load()),
-                        args=[ast.Constant(value="itertools")],
-                        keywords=[],
-                    ),
-                )
-                out.insert(0, itertools_import)
+            else:
+                if self.using_global:
+                    out.insert(0, template_global_assign_function())
+                if self.using_itertools:
+                    itertools_import = ast.NamedExpr(
+                        target=ast.Name(id="itertools", ctx=ast.Store()),
+                        value=ast.Call(
+                            func=ast.Name(id="__import__", ctx=ast.Load()),
+                            args=[ast.Constant(value="itertools")],
+                            keywords=[],
+                        ),
+                    )
+                    out.insert(0, itertools_import)
 
         # Optimize output
         if len(out) == 0:
@@ -631,6 +716,17 @@ class Converter:
             out_node = out[0]
         else:
             out_node = ast.List(elts=out)
+
+        if top_level:
+            if self.isfunc:
+                for processor in self.func_post_processors:
+                    processor.run(out_node)
+            else:
+                for processor in self.non_func_post_processors:
+                    processor.run(out_node)
+
+            for processor in self.post_processors:
+                processor.run(out_node)
 
         return out_node
 
