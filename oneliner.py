@@ -19,6 +19,20 @@ def unique_id() -> str:
     return uid
 
 
+def ast_walk(node: ast.AST, excludes: Optional[list] = None):
+    if excludes is None:
+        excludes = []
+    from collections import deque
+
+    todo = deque([node])
+    while todo:
+        node = todo.popleft()
+        if type(node) in excludes:
+            continue
+        todo.extend(ast.iter_child_nodes(node))
+        yield node
+
+
 def arg_remove_annotation(arg: ast.arguments) -> None:
     # Warning: In place operation
     if arg.vararg is not None:
@@ -150,6 +164,7 @@ class Converter:
         self.isfunc = isfunc
 
         self.loop_control_stack = []
+        self.names: set[str] = set()
 
         self.usesing_itertools = False
         self.filename = "<string>"
@@ -159,6 +174,7 @@ class Converter:
             self.not_return = ast.Name(id="__ol_not_return_" + _id)
             self.return_value = ast.Name(id="__ol_return_value_" + _id)
             self.have_return = False
+            self.global_names: set[str] = set()
 
         self.node_handler_map = {
             ast.Expr: self.handle_expr,
@@ -174,10 +190,17 @@ class Converter:
             ast.Continue: self.handle_continue,
             ast.Break: self.handle_break,
             ast.Return: self.handle_return,
+            ast.Global: self.handle_global,
         }
 
     def set_filename(self, name: str) -> None:
         self.filename = name
+
+    def update_names(self, nodes: list[ast.AST]) -> None:
+        for node in nodes:
+            for _node in ast_walk(node, excludes=[ast.Lambda]):
+                if isinstance(_node, ast.Name) and not _node.id.startswith("__ol_"):
+                    self.names.add(_node.id)
 
     def handle_for(self, for_statement: ast.For) -> list[ast.AST]:
         out = []
@@ -499,6 +522,19 @@ class Converter:
     def handle_expr(self, expr: ast.Expr) -> list[ast.AST]:
         return [expr]
 
+    def handle_global(self, global_statement: ast.Global) -> list[ast.AST]:
+        if not self.isfunc:
+            return []
+        for name in global_statement.names:
+            if name in self.names:
+                raise SyntaxError(
+                    f"Invalid Syntax.\n"
+                    f'File "{self.filename}", line {global_statement.lineno}\n'
+                    f"    Name '{name}' is used prior to global declaration."
+                )
+            self.global_names.add(name)
+        return []
+
     def convert(self, nodes: list[ast.AST], top_level: bool = False) -> ast.AST:
         out = []
 
@@ -512,6 +548,7 @@ class Converter:
 
             # Handle AST node
             converted_list = self.node_handler_map[type(node)](node)
+            self.update_names(converted_list)
             out.extend(converted_list)
 
             if type(node) in [ast.Continue, ast.Break, ast.Return]:
