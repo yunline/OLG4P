@@ -1,6 +1,6 @@
 import ast
 import random
-from typing import Optional, List
+from typing import Optional
 
 random.seed(12345)
 
@@ -18,12 +18,24 @@ def unique_id():
         uid = "".join(random.choice("abcdefghijklmnopqrstuvwxyz") for i in range(10))
     return uid
 
+def ast_walk(node,excludes:Optional[list]=None):
+    if excludes is None:
+        excludes=[]
+    from collections import deque
+    todo = deque([node])
+    while todo:
+        node = todo.popleft()
+        if type(node) in excludes:
+            continue
+        todo.extend(ast.iter_child_nodes(node))
+        yield node
 
 class Converter:
     def __init__(self, isfunc: bool = False):
         self.isfunc = isfunc
 
         self.loop_control_stack = []
+        self.names: set[str] = set()
 
         self.usesing_itertools = False
         self.filename = "<string>"
@@ -33,6 +45,7 @@ class Converter:
             self.not_return = ast.Name(id="__ol_not_return_" + _id)
             self.return_value = ast.Name(id="__ol_return_value_" + _id)
             self.have_return = False
+            self.global_names: set[str] = set()
 
         self.node_handler_map = {
             ast.Expr: self.handle_expr,
@@ -48,6 +61,7 @@ class Converter:
             ast.Continue: self.handle_continue,
             ast.Break: self.handle_break,
             ast.Return: self.handle_return,
+            ast.Global: self.handle_global,
         }
 
     def set_filename(self, name: str):
@@ -177,6 +191,12 @@ class Converter:
         for args in [arg.posonlyargs, arg.args, arg.kwonlyargs]:
             for _arg in args:
                 _arg.annotation = None
+
+    def update_names(self, nodes: list):
+        for node in nodes:
+            for _node in ast_walk(node,excludes=[ast.Lambda]):
+                if isinstance(_node, ast.Name) and not _node.id.startswith("__ol_"):
+                    self.names.add(_node.id)
 
     def handle_for(self, for_statement: ast.For) -> list:
         out = []
@@ -498,19 +518,34 @@ class Converter:
     def handle_expr(self, expr: ast.Expr) -> list:
         return [expr]
 
-    def convert(self, nodes: List[ast.AST], top_level: bool = False) -> ast.AST:
+    def handle_global(self, global_statement: ast.Global) -> list:
+        if not self.isfunc:
+            return []
+        for name in global_statement.names:
+            if name in self.names:
+                raise SyntaxError(
+                    f"Invalid Syntax.\n"
+                    f'File "{self.filename}", line {global_statement.lineno}\n'
+                    f"    Name '{name}' is used prior to global declaration."
+                )
+            self.global_names.add(name)
+        return []
+
+    def convert(self, nodes: list[ast.AST], top_level: bool = False) -> ast.AST:
         out = []
 
         for node_index, node in enumerate(nodes):
             if type(node) not in self.node_handler_map:
                 raise ConvertError(
-                    f'Convert failed.\nError: "{self.filename}", '
-                    f"line {node.lineno}, "
-                    f'Statement "{type(node).__name__}" is not convertable.'
+                    f"Convert failed.\n"
+                    f'File "{self.filename}", line {node.lineno}\n'
+                    f'    Statement "{type(node).__name__}" is not convertable.'
                 )
 
             # Handle AST node
-            out.extend(self.node_handler_map[type(node)](node))
+            converted_list = self.node_handler_map[type(node)](node)
+            self.update_names(converted_list)
+            out.extend(converted_list)
 
             if type(node) in [ast.Continue, ast.Break, ast.Return]:
                 break
@@ -550,6 +585,7 @@ class Converter:
                     break
 
         if top_level:
+            print(self.names)
             if self.isfunc:
                 if self.have_return:
                     _not_return_assign = ast.NamedExpr(
@@ -599,7 +635,7 @@ class Converter:
 def convert_code_string(code: str, filename: Optional[str] = None) -> str:
     c = Converter()
     if filename is not None:
-        c.set_filename(filename)
+        c.set_filename(os.path.abspath(filename))
     return ast.unparse(
         c.convert(ast.parse(code).body, top_level=True),
     ).replace("\n", "")
