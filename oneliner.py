@@ -57,7 +57,14 @@ class Converter:
     def template_subscript_assign(target: ast.Subscript, value: ast.AST) -> ast.AST:
         _slice = target.slice
         if isinstance(target.slice, ast.Slice):
-            _slice = ast.Call(func=ast.Name(id="slice"), args=[], keywords=[])
+            _slice = ast.Call(
+                func=ast.Name(
+                    id="slice",
+                    ctx=ast.Load(),
+                ),
+                args=[],
+                keywords=[],
+            )
             for i in [
                 target.slice.lower,
                 target.slice.upper,
@@ -69,7 +76,11 @@ class Converter:
                     _slice.args.append(i)
 
         out = ast.Call(
-            func=ast.Attribute(value=target.value, attr="__setitem__"),
+            func=ast.Attribute(
+                value=target.value,
+                attr="__setitem__",
+                ctx=ast.Load(),
+            ),
             args=[_slice, value],
             keywords=[],
         )
@@ -78,7 +89,11 @@ class Converter:
     @staticmethod
     def template_attribute_assign(target: ast.Attribute, value: ast.AST) -> ast.AST:
         out = ast.Call(
-            func=ast.Attribute(value=target.value, attr="__setattr__"),
+            func=ast.Attribute(
+                value=target.value,
+                attr="__setattr__",
+                ctx=ast.Load(),
+            ),
             args=[ast.Constant(value=target.attr), value],
             keywords=[],
         )
@@ -86,6 +101,7 @@ class Converter:
 
     def template_auto_assign(self, target: ast.AST, value: ast.AST) -> ast.AST:
         if isinstance(target, ast.Name):
+            target.ctx = ast.Store()
             out = ast.NamedExpr(target=target, value=value)
         elif isinstance(target, ast.Subscript):
             out = self.template_subscript_assign(target, value)
@@ -112,7 +128,14 @@ class Converter:
                 body=condition,
             ),
             ast.Call(
-                func=ast.Attribute(value=ast.Name(id="itertools"), attr="count"),
+                func=ast.Attribute(
+                    value=ast.Name(
+                        id="itertools",
+                        ctx=ast.Load(),
+                    ),
+                    attr="count",
+                    ctx=ast.Load(),
+                ),
                 args=[],
                 keywords=[],
             ),
@@ -121,10 +144,18 @@ class Converter:
             elt=payload,
             generators=[
                 ast.comprehension(
-                    target=ast.Name(id="_"),
+                    target=ast.Name(
+                        id="_",
+                        ctx=ast.Store(),
+                    ),
                     iter=ast.Call(
                         func=ast.Attribute(
-                            value=ast.Name(id="itertools"), attr="takewhile"
+                            value=ast.Name(
+                                id="itertools",
+                                ctx=ast.Load(),
+                            ),
+                            attr="takewhile",
+                            ctx=ast.Load(),
                         ),
                         args=takewhile_args,
                         keywords=[],
@@ -187,7 +218,14 @@ class Converter:
             if self.isfunc and self.have_return:
                 not_interrupt.values.append(self.not_return)
             _iter = ast.Call(
-                func=ast.Attribute(value=ast.Name(id="itertools"), attr="takewhile"),
+                func=ast.Attribute(
+                    value=ast.Name(
+                        id="itertools",
+                        ctx=ast.Load(),
+                    ),
+                    attr="takewhile",
+                    ctx=ast.Load(),
+                ),
                 args=[
                     ast.Lambda(
                         args=ast.arguments(
@@ -211,7 +249,10 @@ class Converter:
             elt=payload,
             generators=[
                 ast.comprehension(
-                    target=for_statement.target, iter=_iter, ifs=[], is_async=False
+                    target=for_statement.target,
+                    iter=_iter,
+                    ifs=[],
+                    is_async=False,
                 )
             ],
         )
@@ -287,14 +328,17 @@ class Converter:
         if isinstance(_target, ast.Tuple):
             tmp_variable_name = "__ol_assign_tmp_" + unique_id()
 
-            out.append(
-                ast.NamedExpr(target=ast.Name(id=tmp_variable_name), value=assign.value)
+            assign_to_tmp = ast.NamedExpr(
+                target=ast.Name(id=tmp_variable_name, ctx=ast.Store()),
+                value=assign.value,
             )
+            out.append(assign_to_tmp)
 
             for ind, single_target in enumerate(_target.elts):
                 value = ast.Subscript(
-                    value=ast.Name(id=tmp_variable_name),
+                    value=ast.Name(id=tmp_variable_name, ctx=ast.Load()),
                     slice=ast.Constant(value=ind),
+                    ctx=ast.Load(),
                 )
                 single_assign = self.template_auto_assign(single_target, value)
                 out.append(single_assign)
@@ -327,12 +371,19 @@ class Converter:
         out = ast.Expr(
             value=ast.IfExp(
                 test=ast.Call(
-                    func=ast.Name(id="hasattr"),
+                    func=ast.Name(
+                        id="hasattr",
+                        ctx=ast.Load(),
+                    ),
                     args=[assign.target, ast.Constant(value=i_op_name)],
                     keywords=[],
                 ),
                 body=ast.Call(
-                    func=ast.Attribute(value=assign.target, attr=i_op_name),
+                    func=ast.Attribute(
+                        value=assign.target,
+                        attr=i_op_name,
+                        ctx=ast.Load(),
+                    ),
                     args=[assign.value],
                     keywords=[],
                 ),
@@ -360,19 +411,21 @@ class Converter:
 
         for alias in import_statement.names:
             _import = ast.Call(
-                func=ast.Name("__import__"),
+                func=ast.Name(id="__import__", ctx=ast.Load()),
                 args=[ast.Constant(alias.name)],
                 keywords=[],
             )
 
             module_path_list = alias.name.split(".")
             if alias.asname is None:
-                _name = ast.Name(module_path_list[0])
+                _name = ast.Name(id=module_path_list[0], ctx=ast.Store())
             else:
-                _name = ast.Name(alias.asname)
+                _name = ast.Name(id=alias.asname, ctx=ast.Store())
                 if len(module_path_list) > 1:
                     _import = ast.Attribute(
-                        value=_import, attr=".".join(module_path_list[1:])
+                        value=_import,
+                        attr=".".join(module_path_list[1:]),
+                        ctx=ast.Store(),
                     )
 
             return [ast.NamedExpr(target=_name, value=_import)]
@@ -396,7 +449,10 @@ class Converter:
             )
         return [
             ast.NamedExpr(
-                target=ast.Name(id=def_statement.name),
+                target=ast.Name(
+                    id=def_statement.name,
+                    ctx=ast.Store(),
+                ),
                 value=function_body,
             )
         ]
@@ -520,9 +576,9 @@ class Converter:
 
             elif self.usesing_itertools:
                 itertools_import = ast.NamedExpr(
-                    target=ast.Name(id="itertools"),
+                    target=ast.Name(id="itertools", ctx=ast.Store()),
                     value=ast.Call(
-                        func=ast.Name(id="__import__"),
+                        func=ast.Name(id="__import__", ctx=ast.Load()),
                         args=[ast.Constant(value="itertools")],
                         keywords=[],
                     ),
