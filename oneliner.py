@@ -18,10 +18,12 @@ def unique_id():
         uid = "".join(random.choice("abcdefghijklmnopqrstuvwxyz") for i in range(10))
     return uid
 
-def ast_walk(node,excludes:Optional[list]=None):
+
+def ast_walk(node, excludes: Optional[list] = None):
     if excludes is None:
-        excludes=[]
+        excludes = []
     from collections import deque
+
     todo = deque([node])
     while todo:
         node = todo.popleft()
@@ -29,6 +31,133 @@ def ast_walk(node,excludes:Optional[list]=None):
             continue
         todo.extend(ast.iter_child_nodes(node))
         yield node
+
+
+def arg_remove_annotation(arg: ast.arguments) -> None:
+    # Warning: In place operation
+    if arg.vararg is not None:
+        arg.vararg.annotation = None
+    if arg.kwarg is not None:
+        arg.kwarg.annotation = None
+    for args in [arg.posonlyargs, arg.args, arg.kwonlyargs]:
+        for _arg in args:
+            _arg.annotation = None
+
+
+def template_subscript_assign(target: ast.Subscript, value: ast.AST) -> ast.AST:
+    _slice = target.slice
+    if isinstance(target.slice, ast.Slice):
+        _slice = ast.Call(
+            func=ast.Name(
+                id="slice",
+                ctx=ast.Load(),
+            ),
+            args=[],
+            keywords=[],
+        )
+        for i in [
+            target.slice.lower,
+            target.slice.upper,
+            target.slice.step,
+        ]:
+            if i is None:
+                _slice.args.append(ast.Constant(value=None))
+            else:
+                _slice.args.append(i)
+
+    out = ast.Call(
+        func=ast.Attribute(
+            value=target.value,
+            attr="__setitem__",
+            ctx=ast.Load(),
+        ),
+        args=[_slice, value],
+        keywords=[],
+    )
+    return out
+
+
+def template_attribute_assign(target: ast.Attribute, value: ast.AST) -> ast.AST:
+    out = ast.Call(
+        func=ast.Attribute(
+            value=target.value,
+            attr="__setattr__",
+            ctx=ast.Load(),
+        ),
+        args=[ast.Constant(value=target.attr), value],
+        keywords=[],
+    )
+    return out
+
+
+def template_auto_assign(target: ast.AST, value: ast.AST) -> ast.AST:
+    if isinstance(target, ast.Name):
+        target.ctx = ast.Store()
+        out = ast.NamedExpr(target=target, value=value)
+    elif isinstance(target, ast.Subscript):
+        out = template_subscript_assign(target, value)
+    elif isinstance(target, ast.Attribute):
+        out = template_attribute_assign(target, value)
+    else:
+        if hasattr(target, "lineno"):
+            raise ConvertError(f"Unknown assign type at line {target.lineno}")
+        raise ConvertError("Unknown assign type")
+
+    return out
+
+
+def template_while(payload: ast.AST, condition: ast.AST) -> ast.AST:
+    takewhile_args = [
+        ast.Lambda(
+            args=ast.arguments(
+                posonlyargs=[],
+                args=[ast.arg(arg="_")],
+                kwonlyargs=[],
+                kw_defaults=[],
+                defaults=[],
+            ),
+            body=condition,
+        ),
+        ast.Call(
+            func=ast.Attribute(
+                value=ast.Name(
+                    id="itertools",
+                    ctx=ast.Load(),
+                ),
+                attr="count",
+                ctx=ast.Load(),
+            ),
+            args=[],
+            keywords=[],
+        ),
+    ]
+    out = ast.ListComp(
+        elt=payload,
+        generators=[
+            ast.comprehension(
+                target=ast.Name(
+                    id="_",
+                    ctx=ast.Store(),
+                ),
+                iter=ast.Call(
+                    func=ast.Attribute(
+                        value=ast.Name(
+                            id="itertools",
+                            ctx=ast.Load(),
+                        ),
+                        attr="takewhile",
+                        ctx=ast.Load(),
+                    ),
+                    args=takewhile_args,
+                    keywords=[],
+                ),
+                ifs=[],
+                is_async=0,
+            )
+        ],
+    )
+    return out
+
 
 class Converter:
     def __init__(self, isfunc: bool = False):
@@ -67,134 +196,9 @@ class Converter:
     def set_filename(self, name: str):
         self.filename = name
 
-    @staticmethod
-    def template_subscript_assign(target: ast.Subscript, value: ast.AST) -> ast.AST:
-        _slice = target.slice
-        if isinstance(target.slice, ast.Slice):
-            _slice = ast.Call(
-                func=ast.Name(
-                    id="slice",
-                    ctx=ast.Load(),
-                ),
-                args=[],
-                keywords=[],
-            )
-            for i in [
-                target.slice.lower,
-                target.slice.upper,
-                target.slice.step,
-            ]:
-                if i is None:
-                    _slice.args.append(ast.Constant(value=None))
-                else:
-                    _slice.args.append(i)
-
-        out = ast.Call(
-            func=ast.Attribute(
-                value=target.value,
-                attr="__setitem__",
-                ctx=ast.Load(),
-            ),
-            args=[_slice, value],
-            keywords=[],
-        )
-        return out
-
-    @staticmethod
-    def template_attribute_assign(target: ast.Attribute, value: ast.AST) -> ast.AST:
-        out = ast.Call(
-            func=ast.Attribute(
-                value=target.value,
-                attr="__setattr__",
-                ctx=ast.Load(),
-            ),
-            args=[ast.Constant(value=target.attr), value],
-            keywords=[],
-        )
-        return out
-
-    def template_auto_assign(self, target: ast.AST, value: ast.AST) -> ast.AST:
-        if isinstance(target, ast.Name):
-            target.ctx = ast.Store()
-            out = ast.NamedExpr(target=target, value=value)
-        elif isinstance(target, ast.Subscript):
-            out = self.template_subscript_assign(target, value)
-        elif isinstance(target, ast.Attribute):
-            out = self.template_attribute_assign(target, value)
-        else:
-            if hasattr(target, "lineno"):
-                raise ConvertError(f"Unknown assign type at line {target.lineno}")
-            raise ConvertError("Unknown assign type")
-
-        return out
-
-    @staticmethod
-    def template_while(payload: ast.AST, condition: ast.AST) -> ast.AST:
-        takewhile_args = [
-            ast.Lambda(
-                args=ast.arguments(
-                    posonlyargs=[],
-                    args=[ast.arg(arg="_")],
-                    kwonlyargs=[],
-                    kw_defaults=[],
-                    defaults=[],
-                ),
-                body=condition,
-            ),
-            ast.Call(
-                func=ast.Attribute(
-                    value=ast.Name(
-                        id="itertools",
-                        ctx=ast.Load(),
-                    ),
-                    attr="count",
-                    ctx=ast.Load(),
-                ),
-                args=[],
-                keywords=[],
-            ),
-        ]
-        out = ast.ListComp(
-            elt=payload,
-            generators=[
-                ast.comprehension(
-                    target=ast.Name(
-                        id="_",
-                        ctx=ast.Store(),
-                    ),
-                    iter=ast.Call(
-                        func=ast.Attribute(
-                            value=ast.Name(
-                                id="itertools",
-                                ctx=ast.Load(),
-                            ),
-                            attr="takewhile",
-                            ctx=ast.Load(),
-                        ),
-                        args=takewhile_args,
-                        keywords=[],
-                    ),
-                    ifs=[],
-                    is_async=0,
-                )
-            ],
-        )
-        return out
-
-    @staticmethod
-    def arg_remove_annotation(arg: ast.arguments) -> None:
-        # Warning: In place operation
-        if arg.vararg is not None:
-            arg.vararg.annotation = None
-        if arg.kwarg is not None:
-            arg.kwarg.annotation = None
-        for args in [arg.posonlyargs, arg.args, arg.kwonlyargs]:
-            for _arg in args:
-                _arg.annotation = None
-
     def update_names(self, nodes: list):
         for node in nodes:
-            for _node in ast_walk(node,excludes=[ast.Lambda]):
+            for _node in ast_walk(node, excludes=[ast.Lambda]):
                 if isinstance(_node, ast.Name) and not _node.id.startswith("__ol_"):
                     self.names.add(_node.id)
 
@@ -329,7 +333,7 @@ class Converter:
         if self.isfunc and self.have_return:  # 如果包含return
             condition = ast.BoolOp(op=ast.And(), values=[self.not_return, condition])
 
-        out.append(self.template_while(payload, condition))
+        out.append(template_while(payload, condition))
 
         if while_statement.orelse:  # 处理else
             if loop_control_info["have_break"]:
@@ -360,11 +364,11 @@ class Converter:
                     slice=ast.Constant(value=ind),
                     ctx=ast.Load(),
                 )
-                single_assign = self.template_auto_assign(single_target, value)
+                single_assign = template_auto_assign(single_target, value)
                 out.append(single_assign)
 
         else:
-            out.append(self.template_auto_assign(_target, assign.value))
+            out.append(template_auto_assign(_target, assign.value))
         return out
 
     def handle_aug_assign(self, assign: ast.AugAssign) -> list:
@@ -386,7 +390,7 @@ class Converter:
         i_op_name = _op_dict[type(assign.op)]
 
         orelse_op = ast.BinOp(left=assign.target, op=assign.op, right=assign.value)
-        orelse = self.template_auto_assign(assign.target, orelse_op)
+        orelse = template_auto_assign(assign.target, orelse_op)
 
         out = ast.Expr(
             value=ast.IfExp(
@@ -451,7 +455,7 @@ class Converter:
             return [ast.NamedExpr(target=_name, value=_import)]
 
     def handle_def(self, def_statement: ast.FunctionDef) -> list:
-        self.arg_remove_annotation(def_statement.args)
+        arg_remove_annotation(def_statement.args)
 
         converter = Converter(isfunc=True)
         converter.set_filename(self.filename)
@@ -585,7 +589,6 @@ class Converter:
                     break
 
         if top_level:
-            print(self.names)
             if self.isfunc:
                 if self.have_return:
                     _not_return_assign = ast.NamedExpr(
