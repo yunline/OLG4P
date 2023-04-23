@@ -12,14 +12,14 @@ class ConvertError(Exception):
 unique_id_set = {""}
 
 
-def unique_id():
+def unique_id() -> str:
     uid = ""
     while uid in unique_id_set:
         uid = "".join(random.choice("abcdefghijklmnopqrstuvwxyz") for i in range(10))
     return uid
 
 
-def ast_walk(node, excludes: Optional[list] = None):
+def ast_walk(node: ast.AST, excludes: Optional[list] = None):
     if excludes is None:
         excludes = []
     from collections import deque
@@ -160,7 +160,7 @@ def template_while(payload: ast.AST, condition: ast.AST) -> ast.AST:
 
 
 class Converter:
-    def __init__(self, isfunc: bool = False):
+    def __init__(self, isfunc: bool = False) -> None:
         self.isfunc = isfunc
 
         self.loop_control_stack = []
@@ -193,16 +193,16 @@ class Converter:
             ast.Global: self.handle_global,
         }
 
-    def set_filename(self, name: str):
+    def set_filename(self, name: str) -> None:
         self.filename = name
 
-    def update_names(self, nodes: list):
+    def update_names(self, nodes: list[ast.AST]) -> None:
         for node in nodes:
             for _node in ast_walk(node, excludes=[ast.Lambda]):
                 if isinstance(_node, ast.Name) and not _node.id.startswith("__ol_"):
                     self.names.add(_node.id)
 
-    def handle_for(self, for_statement: ast.For) -> list:
+    def handle_for(self, for_statement: ast.For) -> list[ast.AST]:
         out = []
 
         _id = unique_id()
@@ -293,7 +293,7 @@ class Converter:
 
         return out
 
-    def handle_while(self, while_statement: ast.While) -> list:
+    def handle_while(self, while_statement: ast.While) -> list[ast.AST]:
         out = []
         self.usesing_itertools = True
 
@@ -345,7 +345,7 @@ class Converter:
             out.append(orelse)
         return out
 
-    def handle_assign(self, assign: ast.Assign) -> list:
+    def handle_assign(self, assign: ast.Assign) -> list[ast.AST]:
         out = []
         _target = assign.targets[0]
 
@@ -371,7 +371,7 @@ class Converter:
             out.append(template_auto_assign(_target, assign.value))
         return out
 
-    def handle_aug_assign(self, assign: ast.AugAssign) -> list:
+    def handle_aug_assign(self, assign: ast.AugAssign) -> list[ast.AST]:
         _op_dict = {
             ast.Add: "__iadd__",
             ast.BitAnd: "__iand__",
@@ -416,18 +416,18 @@ class Converter:
         )
         return [out]
 
-    def handle_ann_assign(self, assign: ast.AnnAssign) -> list:
+    def handle_ann_assign(self, assign: ast.AnnAssign) -> list[ast.AST]:
         out = []
         if assign.value is not None:
             out.append(ast.NamedExpr(assign.target, assign.value))
         return out
 
-    def handle_if(self, if_statement: ast.If) -> list:
+    def handle_if(self, if_statement: ast.If) -> list[ast.AST]:
         body = self.convert(if_statement.body)
         orelse = self.convert(if_statement.orelse)
         return [ast.IfExp(if_statement.test, body, orelse)]
 
-    def handle_import(self, import_statement: ast.Import) -> list:
+    def handle_import(self, import_statement: ast.Import) -> list[ast.AST]:
         # Example:
         # import pygame._sdl2.video as vvv
         #      ↓↓↓↓↓↓↓↓↓↓↓↓↓
@@ -454,7 +454,7 @@ class Converter:
 
             return [ast.NamedExpr(target=_name, value=_import)]
 
-    def handle_def(self, def_statement: ast.FunctionDef) -> list:
+    def handle_def(self, def_statement: ast.FunctionDef) -> list[ast.AST]:
         arg_remove_annotation(def_statement.args)
 
         converter = Converter(isfunc=True)
@@ -481,7 +481,7 @@ class Converter:
             )
         ]
 
-    def handle_break(self, break_statement: ast.Break) -> list:
+    def handle_break(self, break_statement: ast.Break) -> list[ast.AST]:
         self.loop_control_stack[-1]["have_break"] = True  # have break
         self.loop_control_stack[-1]["have_continue"] = True  # break includes continue
 
@@ -496,7 +496,7 @@ class Converter:
             ),
         ]
 
-    def handle_continue(self, continue_statement: ast.Continue) -> list:
+    def handle_continue(self, continue_statement: ast.Continue) -> list[ast.AST]:
         self.loop_control_stack[-1]["have_continue"] = True  # have continue
 
         return [
@@ -506,7 +506,7 @@ class Converter:
             )
         ]
 
-    def handle_return(self, return_statement: ast.Return) -> list:
+    def handle_return(self, return_statement: ast.Return) -> list[ast.AST]:
         self.have_return = True
         return_value = return_statement.value
         if return_value is None:
@@ -516,13 +516,13 @@ class Converter:
             ast.NamedExpr(target=self.return_value, value=return_value),
         ]
 
-    def handle_pass(self, pass_statement: ast.Pass) -> list:
+    def handle_pass(self, pass_statement: ast.Pass) -> list[ast.AST]:
         return []
 
-    def handle_expr(self, expr: ast.Expr) -> list:
+    def handle_expr(self, expr: ast.Expr) -> list[ast.AST]:
         return [expr]
 
-    def handle_global(self, global_statement: ast.Global) -> list:
+    def handle_global(self, global_statement: ast.Global) -> list[ast.AST]:
         if not self.isfunc:
             return []
         for name in global_statement.names:
