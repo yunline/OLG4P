@@ -48,6 +48,18 @@ def arg_remove_annotation(arg: ast.arguments) -> None:
             _arg.annotation = None
 
 
+def arg_to_names(arg: ast.arguments) -> list[str]:
+    names = []
+    if arg.vararg is not None:
+        names.append(arg.vararg.arg)
+    if arg.kwarg is not None:
+        names.append(arg.kwarg.arg)
+    for args in [arg.posonlyargs, arg.args, arg.kwonlyargs]:
+        for _arg in args:
+            names.append(_arg.arg)
+    return names
+
+
 def template_subscript_assign(target: ast.Subscript, value: ast.AST) -> ast.AST:
     _slice = target.slice
     if isinstance(target.slice, ast.Slice):
@@ -604,6 +616,14 @@ class Converter:
         arg_remove_annotation(def_statement.args)
 
         converter = Converter(isfunc=True)
+        arg_names = arg_to_names(def_statement.args)
+        if len(arg_names) != len(set(arg_names)):
+            raise SyntaxError(
+                f"Invalid Syntax.\n"
+                f'File "{self.filename}", line {def_statement.lineno}\n'
+                f"    Duplicate argument in function definition."
+            )
+        converter.names.update(arg_names)
         converter.set_filename(self.filename)
         function_body = ast.Lambda(
             args=def_statement.args,
