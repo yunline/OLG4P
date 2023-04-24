@@ -423,6 +423,45 @@ func(1,2,3,4,5,c=6,d=7,e=8)
 """
         self.check_convert(script)
 
+    def test_convert_function_with_global(self):
+        script = """
+global_var1=0
+global_var2=0
+global_var3=0
+def func():
+    global global_var1
+    global_var1=1
+    global_var2=1
+    global_var3=1
+    def func2():
+        global global_var2
+        print(global_var1:=2)
+        print(global_var2:=2)
+        print(global_var3:=2)
+    func2()
+    
+func()
+print(global_var1)
+print(global_var2)
+print(global_var3)
+"""
+        self.check_convert(script)
+
+        script = """
+global_var1=0
+def func(global_var1):
+    global global_var1
+"""
+        self.assertRaises(SyntaxError, lambda: self.check_convert(script))
+
+        script = """
+global_var1=0
+def func():
+    global_var1=666
+    global global_var1
+"""
+        self.assertRaises(SyntaxError, lambda: self.check_convert(script))
+
 
 if __name__ == "__main__":
     unittest.main()
