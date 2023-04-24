@@ -9,6 +9,10 @@ class ConvertError(Exception):
     pass
 
 
+class PostProcessError(Exception):
+    pass
+
+
 unique_id_set = {""}
 
 
@@ -211,27 +215,82 @@ def template_global_assign_function() -> ast.AST:
     )
 
 
-class PostProcessor:
-    def run(self, node: ast.AST) -> None:
-        raise NotImplementedError()
+def global_assign_pp(converter, node: ast.AST) -> ast.AST:
+    class _Transformer(ast.NodeTransformer):
+        def visit_NamedExpr(self, node: ast.NamedExpr):
+            if node.target.id not in converter.global_names:
+                return node
+            return ast.Call(
+                func=ast.Name(id="__ol_global_assign", ctx=ast.Load()),
+                args=[ast.Constant(value=node.target.id), node.value],
+                keywords=[],
+            )
+
+    _Transformer().visit(node)
+    return node
 
 
-class GlobalAssignPostProcessor(ast.NodeTransformer, PostProcessor):
-    def __init__(self, names, global_names):
-        self.names = names
-        self.global_names = global_names
+def output_optimize_pp(converter, node: ast.AST) -> ast.AST:
+    # Remove unnecessary List expression
+    # [(a := 1)] -> (a := 1)
+    if isinstance(node, ast.List):
+        if len(node.elts) == 0:
+            return ast.Constant(value=None)
+        elif len(node.elts) == 1:
+            return node.elts[0]
+    return node
 
-    def visit_NamedExpr(self, node: ast.NamedExpr):
-        if node.target.id not in self.global_names:
-            return node
-        return ast.Call(
-            func=ast.Name(id="__ol_global_assign", ctx=ast.Load()),
-            args=[ast.Constant(value=node.target.id), node.value],
-            keywords=[],
+
+def insert_global_assign_function_pp(converter, node: ast.List) -> ast.AST:
+    if not isinstance(node, ast.List):
+        raise PostProcessError("'node' must be ast.List")
+    if converter.using_global:
+        node.elts.insert(0, template_global_assign_function())
+    return node
+
+
+def insert_itertool_pp(converter, node: ast.List) -> ast.AST:
+    if not isinstance(node, ast.List):
+        raise PostProcessError("'node' must be ast.List")
+    if converter.using_itertools:
+        itertools_import = ast.NamedExpr(
+            target=ast.Name(id="itertools", ctx=ast.Store()),
+            value=ast.Call(
+                func=ast.Name(id="__import__", ctx=ast.Load()),
+                args=[ast.Constant(value="itertools")],
+                keywords=[],
+            ),
         )
+        node.elts.insert(0, itertools_import)
 
-    def run(self, node: ast.AST) -> None:
-        self.visit(node)
+    return node
+
+
+def func_pp(converter, node: ast.List) -> ast.AST:
+    if not isinstance(node, ast.List):
+        raise PostProcessError("'node' must be ast.List")
+    if not converter.isfunc:
+        return node
+    if converter.have_return:
+        _not_return_assign = ast.NamedExpr(
+            target=converter.not_return,
+            value=ast.Constant(value=True),
+        )
+        _return_value_assign = ast.NamedExpr(
+            target=converter.return_value,
+            value=ast.Constant(value=None),
+        )
+        node.elts.insert(0, _not_return_assign)
+        node.elts.insert(0, _return_value_assign)
+
+        node.elts.append(converter.return_value)
+    else:
+        node.elts.append(ast.Constant(value=None))
+
+    return ast.Subscript(
+        value=ast.List(elts=node.elts),
+        slice=ast.Constant(value=-1),
+    )
 
 
 class Converter:
@@ -244,8 +303,13 @@ class Converter:
         self.using_itertools = False
         self.using_global = False
         self.filename = "<string>"
-        self.post_processors = []
-        self.non_func_post_processors = []
+        self.post_processors = [
+            output_optimize_pp,  # Keep this at the bottom
+        ]
+        self.non_func_post_processors = [
+            insert_global_assign_function_pp,
+            insert_itertool_pp,
+        ]
 
         if isfunc:
             _id = unique_id()
@@ -254,7 +318,8 @@ class Converter:
             self.have_return = False
             self.global_names: set[str] = set()
             self.func_post_processors = [
-                GlobalAssignPostProcessor(self.names, self.global_names),
+                func_pp,
+                global_assign_pp,
             ]
 
         self.node_handler_map = {
@@ -670,63 +735,18 @@ class Converter:
                     out.append(check_interrupt_expr)
                     break
 
-        if top_level:
-            if self.isfunc:
-                if self.have_return:
-                    _not_return_assign = ast.NamedExpr(
-                        target=self.not_return,
-                        value=ast.Constant(value=True),
-                    )
-                    _return_value_assign = ast.NamedExpr(
-                        target=self.return_value,
-                        value=ast.Constant(value=None),
-                    )
-                    out.insert(0, _not_return_assign)
-                    out.insert(0, _return_value_assign)
-
-                    out.append(self.return_value)
-                else:
-                    out.append(ast.Constant(value=None))
-
-                out = [
-                    ast.Subscript(
-                        value=ast.List(elts=out),
-                        slice=ast.Constant(value=-1),
-                    )
-                ]
-
-            else:
-                if self.using_global:
-                    out.insert(0, template_global_assign_function())
-                if self.using_itertools:
-                    itertools_import = ast.NamedExpr(
-                        target=ast.Name(id="itertools", ctx=ast.Store()),
-                        value=ast.Call(
-                            func=ast.Name(id="__import__", ctx=ast.Load()),
-                            args=[ast.Constant(value="itertools")],
-                            keywords=[],
-                        ),
-                    )
-                    out.insert(0, itertools_import)
-
-        # Optimize output
-        if len(out) == 0:
-            out_node = ast.Constant(value=None)
-        elif len(out) == 1:
-            out_node = out[0]
-        else:
-            out_node = ast.List(elts=out)
+        out_node = ast.List(elts=out)
 
         if top_level:
             if self.isfunc:
                 for processor in self.func_post_processors:
-                    processor.run(out_node)
+                    out_node = processor(self, out_node)
             else:
                 for processor in self.non_func_post_processors:
-                    processor.run(out_node)
+                    out_node = processor(self, out_node)
 
             for processor in self.post_processors:
-                processor.run(out_node)
+                out_node = processor(self, out_node)
 
         return out_node
 
