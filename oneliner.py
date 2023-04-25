@@ -399,6 +399,8 @@ class Converter:
                 not_interrupt.values.append(not_break)
             if self.isfunc and self.have_return:
                 not_interrupt.values.append(self.not_return)
+            if len(not_interrupt.values) == 1:
+                not_interrupt = not_interrupt.values[0]
             _iter = ast.Call(
                 func=ast.Attribute(
                     value=ast.Name(
