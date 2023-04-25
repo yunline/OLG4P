@@ -282,7 +282,7 @@ def func_pp(converter, node: ast.List) -> ast.AST:
     if not isinstance(node, ast.List):
         raise PostProcessError("'node' must be ast.List")
     if not converter.isfunc:
-        return node
+        raise PostProcessError("func_pp is for function convertion only")
     if converter.have_return:
         _not_return_assign = ast.NamedExpr(
             target=converter.not_return,
@@ -318,7 +318,7 @@ class Converter:
         self.post_processors = [
             output_optimize_pp,  # Keep this at the bottom
         ]
-        self.non_func_post_processors = [
+        self.top_level_post_processors = [
             insert_global_assign_function_pp,
             insert_itertool_pp,
         ]
@@ -675,12 +675,18 @@ class Converter:
     def handle_return(self, return_statement: ast.Return) -> list[ast.AST]:
         self.have_return = True
         return_value = return_statement.value
-        if return_value is None:
-            return_value = ast.Constant(value=None)
-        return [
-            ast.NamedExpr(target=self.not_return, value=ast.Constant(value=False)),
-            ast.NamedExpr(target=self.return_value, value=return_value),
-        ]
+        out = [ast.NamedExpr(target=self.not_return, value=ast.Constant(value=False))]
+        if (
+            return_value is None
+            or isinstance(return_value, ast.Constant)
+            and return_value.value is None
+        ):  # if returns None, return_value_assign is not needed
+            return out
+        return_value_assign = ast.NamedExpr(
+            target=self.return_value, value=return_value
+        )
+        out.append(return_value_assign)
+        return out
 
     def handle_pass(self, pass_statement: ast.Pass) -> list[ast.AST]:
         return []
@@ -762,11 +768,11 @@ class Converter:
                 for processor in self.func_post_processors:
                     out_node = processor(self, out_node)
             else:
-                for processor in self.non_func_post_processors:
+                for processor in self.top_level_post_processors:
                     out_node = processor(self, out_node)
 
-            for processor in self.post_processors:
-                out_node = processor(self, out_node)
+        for processor in self.post_processors:
+            out_node = processor(self, out_node)
 
         return out_node
 
