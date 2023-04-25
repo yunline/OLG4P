@@ -157,6 +157,12 @@ while i<10:
         break
 else:
     print("qwq")
+
+while 0:
+    print("xd")
+    break
+else:
+    print("awa")
 """
         self.check_convert(script.format("True"))
         self.check_convert(script.format("False"))

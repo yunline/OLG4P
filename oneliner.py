@@ -48,6 +48,30 @@ def arg_remove_annotation(arg: ast.arguments) -> None:
             _arg.annotation = None
 
 
+def bool_op_optimize(bool_op: ast.BoolOp) -> ast.AST:
+    # Remove unnecessary constants in BoolOp
+    # if (a and True) -> if a
+    if not isinstance(bool_op, ast.BoolOp):
+        return bool_op
+    out_values = []
+    for v in bool_op.values:
+        if isinstance(v, ast.BoolOp):
+            v = bool_op_optimize(v)
+        if isinstance(v, ast.Constant):
+            if isinstance(bool_op.op, ast.And) and not v.value:
+                return ast.Constant(value=False)
+            elif isinstance(bool_op.op, ast.Or) and v.value:
+                return ast.Constant(value=True)
+        else:
+            out_values.append(v)
+    if not out_values:
+        if isinstance(bool_op.op, ast.And):
+            return ast.Constant(value=True)
+        elif isinstance(bool_op.op, ast.Or):
+            return ast.Constant(value=False)
+    return ast.BoolOp(op=bool_op.op, values=out_values)
+
+
 def arg_to_names(arg: ast.arguments) -> list[str]:
     names = []
     if arg.vararg is not None:
@@ -305,6 +329,15 @@ def func_pp(converter, node: ast.List) -> ast.AST:
     )
 
 
+def bool_op_optimize_pp(converter, node: ast.AST) -> ast.AST:
+    class _Transformer(ast.NodeTransformer):
+        def visit_BoolOp(self, node: ast.BoolOp):
+            return bool_op_optimize(node)
+
+    _Transformer().visit(node)
+    return node
+
+
 class Converter:
     def __init__(self, isfunc: bool = False) -> None:
         self.isfunc = isfunc
@@ -321,6 +354,7 @@ class Converter:
         self.top_level_post_processors = [
             insert_global_assign_function_pp,
             insert_itertool_pp,
+            bool_op_optimize_pp,
         ]
 
         if isfunc:
@@ -487,7 +521,6 @@ class Converter:
 
         if loop_control_info["have_break"]:
             condition = ast.BoolOp(op=ast.And(), values=[not_break, condition])
-
             out.append(ast.NamedExpr(target=not_break, value=ast.Constant(value=True)))
 
         if self.isfunc and self.have_return:  # 如果包含return
