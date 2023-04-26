@@ -262,6 +262,10 @@ def global_assign_pp(converter, node: ast.AST) -> ast.AST:
                 keywords=[],
             )
 
+        def visit_Lambda(self, node: ast.Lambda) -> ast.AST:
+            # skip lambda
+            return node
+
     _Transformer().visit(node)
     return node
 
