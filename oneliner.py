@@ -546,7 +546,7 @@ class Converter:
         out = []
         _target = assign.targets[0]
 
-        if isinstance(_target, ast.Tuple):
+        if type(_target) in [ast.Tuple, ast.List]:
             tmp_variable_name = "__ol_assign_tmp_" + unique_id()
 
             assign_to_tmp = ast.NamedExpr(
