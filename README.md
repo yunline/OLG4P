@@ -48,6 +48,7 @@ Here are the statements that have already been implemented.
 |Import<sub> 1</sub>|`import math`<br> `import os,sys`<br>`import numpy as np`|
 |FunctionDef|`def func(a,*args): ...`|
 |Return|`return None`|
+|Global|`global a`|
 
 Remarks:
 1. 'from-import' is not implmented.
