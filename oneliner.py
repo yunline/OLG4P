@@ -251,6 +251,33 @@ def template_global_assign_function() -> ast.AST:
     )
 
 
+def template_starred_assign(
+    target: ast.AST,
+    tmp_variable_name: str,
+    ind_start: Optional[int],
+    ind_stop: Optional[int],
+) -> ast.AST:
+    assign_value = ast.ListComp(
+        elt=ast.Name(id="i", ctx=ast.Load()),
+        generators=[
+            ast.comprehension(
+                target=ast.Name(id="i", ctx=ast.Store()),
+                iter=ast.Subscript(
+                    value=ast.Name(id=tmp_variable_name, ctx=ast.Load()),
+                    slice=ast.Slice(
+                        lower=ast.Constant(value=ind_start),
+                        upper=ast.Constant(value=ind_stop),
+                    ),
+                    ctx=ast.Load(),
+                ),
+                ifs=[],
+                is_async=0,
+            )
+        ],
+    )
+    return template_auto_assign(target, assign_value)
+
+
 def global_assign_pp(converter, node: ast.AST) -> ast.AST:
     class _Transformer(ast.NodeTransformer):
         def visit_NamedExpr(self, node: ast.NamedExpr):
@@ -551,19 +578,46 @@ class Converter:
 
             assign_to_tmp = ast.NamedExpr(
                 target=ast.Name(id=tmp_variable_name, ctx=ast.Store()),
-                value=assign.value,
+                value=ast.Call(
+                    func=ast.Name(id="list", ctx=ast.Load()),
+                    args=[assign.value],
+                    keywords=[],
+                ),
             )
             out.append(assign_to_tmp)
 
+            have_starred = False
             for ind, single_target in enumerate(_target.elts):
-                value = ast.Subscript(
-                    value=ast.Name(id=tmp_variable_name, ctx=ast.Load()),
-                    slice=ast.Constant(value=ind),
-                    ctx=ast.Load(),
-                )
-                single_assign = template_auto_assign(single_target, value)
+                if isinstance(single_target, ast.Starred):
+                    if have_starred:
+                        raise SyntaxError(
+                            f"Invalid Syntax.\n"
+                            f'File "{self.filename}", line {assign.lineno}\n'
+                            f"    Multiple starred expressions in assignment"
+                        )
+                    single_assign = template_starred_assign(
+                        single_target.value,
+                        tmp_variable_name,
+                        ind,
+                        ind + 1 - len(_target.elts),
+                    )
+                    have_starred = True
+                else:
+                    value = ast.Subscript(
+                        value=ast.Name(id=tmp_variable_name, ctx=ast.Load()),
+                        slice=ast.Constant(
+                            value=ind if not have_starred else ind - len(_target.elts)
+                        ),
+                        ctx=ast.Load(),
+                    )
+                    single_assign = template_auto_assign(single_target, value)
                 out.append(single_assign)
-
+        elif isinstance(_target, ast.Starred):
+            raise SyntaxError(
+                    f"Invalid Syntax.\n"
+                    f'File "{self.filename}", line {assign.lineno}\n'
+                    f"    Starred assignment target must be in a list or tuple"
+                )
         else:
             out.append(template_auto_assign(_target, assign.value))
         return out
