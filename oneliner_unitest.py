@@ -275,6 +275,10 @@ a.b,c[0],d,e=range(4)
 print(a.b,c,d,e)
 a.b,c[0],d,e=e,d,c[1],a.b
 print(a.b,c,d,e)
+[a,b]=1,2
+print(a,b)
+a,*b,c,d,e=range(16)
+print(a,b,c,d,e)
 """
 
         class Dummy:

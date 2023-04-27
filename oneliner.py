@@ -614,10 +614,10 @@ class Converter:
                 out.append(single_assign)
         elif isinstance(_target, ast.Starred):
             raise SyntaxError(
-                    f"Invalid Syntax.\n"
-                    f'File "{self.filename}", line {assign.lineno}\n'
-                    f"    Starred assignment target must be in a list or tuple"
-                )
+                f"Invalid Syntax.\n"
+                f'File "{self.filename}", line {assign.lineno}\n'
+                f"    Starred assignment target must be in a list or tuple"
+            )
         else:
             out.append(template_auto_assign(_target, assign.value))
         return out
