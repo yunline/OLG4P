@@ -1,3 +1,5 @@
+This tool is deprecated, use [Oneline-Py](https://github.com/yunline/Oneliner-Py) instead.
+
 # One-Liner Generator for Python
 
 A simple script that converts python scripts into one-liner. 
